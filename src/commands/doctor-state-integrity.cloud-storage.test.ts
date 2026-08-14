@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   detectMacCloudSyncedStateDir,
   detectWindowsCloudSyncedStateDir,
+  formatWindowsCloudSyncedStateDirWarning,
 } from "./doctor-state-integrity.js";
 
 describe("detectMacCloudSyncedStateDir", () => {
@@ -214,5 +215,39 @@ describe("detectWindowsCloudSyncedStateDir", () => {
     });
 
     expect(result).toBeNull();
+  });
+});
+
+describe("formatWindowsCloudSyncedStateDirWarning", () => {
+  const warning = () =>
+    formatWindowsCloudSyncedStateDirWarning("%USERPROFILE%\\OneDrive\\OpenClaw\\.openclaw", {
+      path: "C:\\Users\\tester\\OneDrive\\OpenClaw\\.openclaw",
+      storage: "OneDrive",
+    });
+
+  it("names the detected sync root", () => {
+    expect(warning()).toContain("Windows cloud-synced storage");
+    expect(warning()).toContain("OneDrive");
+  });
+
+  // The warning is only shown on Windows, where `VAR=value command` is not a
+  // valid way to set an environment variable for the command that follows.
+  // cmd.exe reports "'VAR' is not recognized as an internal or external
+  // command" and PowerShell reports "The term 'VAR=value' is not recognized",
+  // so a POSIX-shaped hint here sends every reader down a failing recovery path.
+  it("does not emit POSIX inline environment assignment", () => {
+    expect(warning()).not.toMatch(/(?:^|\s)OPENCLAW_STATE_DIR=\S+\s+\S*openclaw\b/m);
+  });
+
+  it("emits a PowerShell command that sets the variable for doctor", () => {
+    expect(warning()).toContain(
+      '  Set locally (PowerShell): $env:OPENCLAW_STATE_DIR="$env:USERPROFILE\\.openclaw"; openclaw doctor',
+    );
+  });
+
+  it("emits a cmd.exe command that sets the variable for doctor", () => {
+    expect(warning()).toContain(
+      '  Set locally (cmd.exe): set "OPENCLAW_STATE_DIR=%USERPROFILE%\\.openclaw" && openclaw doctor',
+    );
   });
 });

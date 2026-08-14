@@ -765,6 +765,25 @@ export function detectWindowsCloudSyncedStateDir(
   return null;
 }
 
+type WindowsCloudSyncedStateDir = NonNullable<ReturnType<typeof detectWindowsCloudSyncedStateDir>>;
+
+/** Formats the warning for state stored under a OneDrive sync root. */
+export function formatWindowsCloudSyncedStateDirWarning(
+  displayStateDir: string,
+  windowsCloudSyncedStateDir: WindowsCloudSyncedStateDir,
+): string {
+  return [
+    `- State directory is under Windows cloud-synced storage (${displayStateDir}; ${windowsCloudSyncedStateDir.storage}).`,
+    "- This can cause slow I/O, sync/lock races, and Files On-Demand dehydration for sessions and credentials.",
+    "- Prefer a local non-synced state dir (for example: %USERPROFILE%\\.openclaw).",
+    // Windows shells reject the POSIX `VAR=value command` form, so each supported
+    // shell gets its own line; one POSIX-shaped hint would fail every operator
+    // the warning is addressed to.
+    `  Set locally (PowerShell): $env:OPENCLAW_STATE_DIR="$env:USERPROFILE\\.openclaw"; ${formatCliCommand("openclaw doctor")}`,
+    `  Set locally (cmd.exe): set "OPENCLAW_STATE_DIR=%USERPROFILE%\\.openclaw" && ${formatCliCommand("openclaw doctor")}`,
+  ].join("\n");
+}
+
 function isPairingPolicy(value: unknown): boolean {
   return normalizeOptionalLowercaseString(value) === "pairing";
 }
@@ -1177,12 +1196,7 @@ export async function noteStateIntegrity(
   }
   if (windowsCloudSyncedStateDir) {
     warnings.push(
-      [
-        `- State directory is under Windows cloud-synced storage (${displayStateDir}; ${windowsCloudSyncedStateDir.storage}).`,
-        "- This can cause slow I/O, sync/lock races, and Files On-Demand dehydration for sessions and credentials.",
-        "- Prefer a local non-synced state dir (for example: %USERPROFILE%\\.openclaw).",
-        `  Set locally: OPENCLAW_STATE_DIR=%USERPROFILE%\\.openclaw ${formatCliCommand("openclaw doctor")}`,
-      ].join("\n"),
+      formatWindowsCloudSyncedStateDirWarning(displayStateDir, windowsCloudSyncedStateDir),
     );
   }
   if (linuxSdBackedStateDir) {
