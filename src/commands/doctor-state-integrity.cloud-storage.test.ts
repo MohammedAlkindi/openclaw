@@ -195,6 +195,39 @@ describe("detectWindowsCloudSyncedStateDir", () => {
     expect(result).toBeNull();
   });
 
+  it("ignores a junction prefix when the state dir leaf does not exist yet", () => {
+    // A fresh install has not created the leaf, so realpath on the state dir
+    // itself fails. Resolving only the existing ancestor still follows the
+    // junction out of OneDrive, so no warning should fire.
+    const junctionRoot = path.join(oneDriveRoot, "OpenClaw");
+    const stateDir = path.join(junctionRoot, ".openclaw");
+    const resolvedLocalRoot = path.join(home, "local-openclaw");
+
+    const result = detectWindowsCloudSyncedStateDir(stateDir, {
+      platform: "win32",
+      env: { OneDrive: oneDriveRoot },
+      resolveRealPath: (target) => (target === junctionRoot ? resolvedLocalRoot : null),
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("still warns when a missing leaf resolves to a path inside OneDrive", () => {
+    const junctionRoot = path.join(oneDriveRoot, "OpenClaw");
+    const stateDir = path.join(junctionRoot, ".openclaw");
+
+    const result = detectWindowsCloudSyncedStateDir(stateDir, {
+      platform: "win32",
+      env: { OneDrive: oneDriveRoot },
+      resolveRealPath: (target) => (target === junctionRoot ? junctionRoot : null),
+    });
+
+    expect(result).toEqual({
+      path: path.resolve(stateDir),
+      storage: "OneDrive",
+    });
+  });
+
   it("returns null when no OneDrive environment variables are set", () => {
     const stateDir = path.join(oneDriveRoot, "OpenClaw", ".openclaw");
 
