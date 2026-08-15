@@ -85,6 +85,47 @@ describe("detectMacCloudSyncedStateDir", () => {
     expect(result).toBeNull();
   });
 
+  it("ignores a symlink prefix when the state dir leaf does not exist yet", () => {
+    // A fresh install has not created the leaf, so realpath on the state dir
+    // itself fails. Resolving only the existing ancestor still follows the
+    // symlink out of the sync root, so no warning should fire.
+    const symlinkRoot = path.join(home, "Library", "CloudStorage", "OneDrive-Personal", "OpenClaw");
+    const stateDir = path.join(symlinkRoot, ".openclaw");
+    const resolvedLocalRoot = path.join(home, "local-openclaw");
+
+    const result = detectMacCloudSyncedStateDir(stateDir, {
+      platform: "darwin",
+      homedir: home,
+      resolveRealPath: (target) =>
+        target === path.resolve(symlinkRoot) ? resolvedLocalRoot : null,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  it("still warns when a missing leaf resolves to a path inside the sync root", () => {
+    const cloudRoot = path.join(
+      home,
+      "Library",
+      "Mobile Documents",
+      "com~apple~CloudDocs",
+      "OpenClaw",
+    );
+    const stateDir = path.join(cloudRoot, ".openclaw");
+
+    const result = detectMacCloudSyncedStateDir(stateDir, {
+      platform: "darwin",
+      homedir: home,
+      resolveRealPath: (target) =>
+        target === path.resolve(cloudRoot) ? path.resolve(cloudRoot) : null,
+    });
+
+    expect(result).toEqual({
+      path: path.resolve(stateDir),
+      storage: "iCloud Drive",
+    });
+  });
+
   it("anchors cloud detection to OS homedir when OPENCLAW_HOME is overridden", () => {
     const stateDir = path.join(home, "Library", "CloudStorage", "iCloud Drive", ".openclaw");
     const originalOpenClawHome = process.env.OPENCLAW_HOME;

@@ -693,16 +693,18 @@ export function detectMacCloudSyncedStateDir(
       root: path.join(homedir, "Library", "CloudStorage"),
     },
   ];
-  const realPath = (deps?.resolveRealPath ?? tryResolveRealPath)(stateDir);
-  // Prefer the resolved target path when available so symlink prefixes do not
-  // misclassify local state dirs as cloud-synced.
-  const candidates = realPath ? [path.resolve(realPath)] : [path.resolve(stateDir)];
+  const resolveRealPath = deps?.resolveRealPath ?? tryResolveRealPath;
+  // A state dir that does not exist yet cannot be resolved directly, and
+  // falling back to the lexical path misreads a not-yet-created leaf beneath a
+  // symlink that actually points at local storage. Resolve through the nearest
+  // existing ancestor, as the Linux detectors in this file do, so the symlink
+  // is followed even when the leaf is absent.
+  const resolvedStatePath =
+    resolvePathThroughExistingAncestor(stateDir, resolveRealPath, path) ?? path.resolve(stateDir);
 
-  for (const candidate of candidates) {
-    for (const { storage, root } of roots) {
-      if (isPathUnderRoot(candidate, root)) {
-        return { path: candidate, storage };
-      }
+  for (const { storage, root } of roots) {
+    if (isPathUnderRoot(resolvedStatePath, root)) {
+      return { path: resolvedStatePath, storage };
     }
   }
 
