@@ -778,11 +778,12 @@ export function formatWindowsCloudSyncedStateDirWarning(
     `- State directory is under Windows cloud-synced storage (${displayStateDir}; ${windowsCloudSyncedStateDir.storage}).`,
     "- This can cause slow I/O, sync/lock races, and Files On-Demand dehydration for sessions and credentials.",
     "- Prefer a local non-synced state dir (for example: %USERPROFILE%\\.openclaw).",
-    // Windows shells reject the POSIX `VAR=value command` form, so each supported
-    // shell gets its own line; one POSIX-shaped hint would fail every operator
-    // the warning is addressed to.
-    `  Set locally (PowerShell): $env:OPENCLAW_STATE_DIR="$env:USERPROFILE\\.openclaw"; ${formatCliCommand("openclaw doctor")}`,
-    `  Set locally (cmd.exe): set "OPENCLAW_STATE_DIR=%USERPROFILE%\\.openclaw" && ${formatCliCommand("openclaw doctor")}`,
+    // No one-shot `OPENCLAW_STATE_DIR=... openclaw doctor` hint here: that
+    // retargets only the doctor process, while the managed Gateway keeps
+    // using the synced directory, so it reads as a fix but is not one.
+    "- To relocate: stop the Gateway, move the whole state directory, set",
+    "  OPENCLAW_STATE_DIR to the new path for the Gateway service (not just",
+    "  one shell), then restart it and re-run doctor to verify.",
   ].join("\n");
 }
 

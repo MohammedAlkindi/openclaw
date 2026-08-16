@@ -272,15 +272,17 @@ describe("formatWindowsCloudSyncedStateDirWarning", () => {
     expect(warning()).not.toMatch(/(?:^|\s)OPENCLAW_STATE_DIR=\S+\s+\S*openclaw\b/m);
   });
 
-  it("emits a PowerShell command that sets the variable for doctor", () => {
-    expect(warning()).toContain(
-      '  Set locally (PowerShell): $env:OPENCLAW_STATE_DIR="$env:USERPROFILE\\.openclaw"; openclaw doctor',
-    );
+  // A one-shot env assignment retargets only the doctor process; the managed
+  // Gateway keeps using the synced directory, so such a hint reads as a fix
+  // without being one.
+  it("does not emit a one-shot doctor retarget command", () => {
+    expect(warning()).not.toContain("$env:OPENCLAW_STATE_DIR");
+    expect(warning()).not.toContain('set "OPENCLAW_STATE_DIR=');
   });
 
-  it("emits a cmd.exe command that sets the variable for doctor", () => {
-    expect(warning()).toContain(
-      '  Set locally (cmd.exe): set "OPENCLAW_STATE_DIR=%USERPROFILE%\\.openclaw" && openclaw doctor',
-    );
+  it("describes relocation for the Gateway service, not just one shell", () => {
+    expect(warning()).toContain("stop the Gateway");
+    expect(warning()).toContain("for the Gateway service");
+    expect(warning()).toContain("re-run doctor");
   });
 });
