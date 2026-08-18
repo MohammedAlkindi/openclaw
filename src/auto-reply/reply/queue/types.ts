@@ -11,6 +11,7 @@ import type { TrustedSubagentCompletionHandoff } from "../../../agents/subagents
 import type { SilentReplyPromptMode } from "../../../agents/system-prompt.types.js";
 import type { ChatType } from "../../../channels/chat-type.js";
 import type { InboundEventKind } from "../../../channels/inbound-event/kind.js";
+import type { ChannelAdmissionEvidence } from "../../../channels/message-access/admission-evidence.js";
 import type { SessionEntry, SessionToolOverrides } from "../../../config/sessions.js";
 import type { ReplyToMode } from "../../../config/types.base.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
@@ -84,6 +85,8 @@ export type FollowupRun = {
   currentInboundEventKind?: InboundEventKind;
   /** Whether the current inbound message contained audio for inbound-only TTS policy. */
   currentInboundAudio?: boolean;
+  /** Host-minted participant evidence; raw channel identities never live on this object. */
+  channelAdmissionEvidence?: ChannelAdmissionEvidence;
   /** Explicit current-turn context that should be visible for this run but not persisted as user text. */
   currentInboundContext?: CurrentInboundPromptContext;
   /** Explicit skills resolved from the authenticated inbound message. */
@@ -95,8 +98,6 @@ export type FollowupRun = {
   deliveryCorrelations?: QueuedReplyDeliveryCorrelation[];
   /** Canonical ownership lifecycle for durable ingress / reply-lane transfer. */
   turnAdoptionLifecycle?: TurnAdoptionLifecycle;
-  /** Dispatch-scoped freshness owner for a queued delivery-barrier wait. */
-  onReplyAdmissionWaitChange?: (waiting: boolean) => void;
   /** Records terminal queue-cap outcomes at the queue owner before lifecycle cleanup. */
   onQueueDisposition?: (disposition: FollowupQueueDisposition) => void;
   /** Provider message ID, when available (for deduplication). */
@@ -177,6 +178,8 @@ export type FollowupRun = {
     workspaceDir: string;
     /** Task working directory for runtime execution. Defaults to workspaceDir. */
     cwd?: string;
+    permissionMode?: SessionEntry["permissionMode"];
+    sessionRoot?: string;
     config: OpenClawConfig;
     toolOverrides?: SessionToolOverrides;
     skillsSnapshot?: SkillSnapshot;

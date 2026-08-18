@@ -42,6 +42,7 @@ export function registerTestCatalogAccess(
 
 export async function listModels(params: {
   catalog: ModelCatalogEntry[];
+  staticEntries?: ModelCatalogEntry[];
   cfg?: OpenClawConfig;
   discoveryModes?: Record<string, "refreshable" | "runtime" | "static">;
   routeResolverFactory?: typeof createOpenAIModelRoutesResolver;
@@ -52,6 +53,7 @@ export async function listModels(params: {
     ({
       agentId: "main",
       agentDir: "/tmp/models-list-openai-agent",
+      catalogComplete: false,
       workspaceDir: "/tmp/models-list-openai-workspace",
       config,
       authModes: {},
@@ -61,6 +63,7 @@ export async function listModels(params: {
       metadataSnapshot: loadManifestMetadataSnapshot({ config, env: process.env }),
       entries: params.catalog,
       routeVariants: params.catalog,
+      ...(params.staticEntries ? { staticEntries: params.staticEntries } : {}),
       authMaterializations: [],
     }) satisfies PreparedGatewayModelCatalogSnapshot;
   registerGatewayModelCatalogPrivateAccess(loadGatewayModelCatalogSnapshot, {

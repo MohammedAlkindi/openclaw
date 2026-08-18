@@ -20,6 +20,7 @@ describe("GATEWAY_EVENTS", () => {
 
   it("advertises node topology updates", () => {
     expect(GATEWAY_EVENTS).toContain("node.presence");
+    expect(GATEWAY_EVENTS).toContain("device.pair.setup.completed");
     expect(GATEWAY_EVENTS).toContain("node.runnerInventory.changed");
   });
 
@@ -71,7 +72,7 @@ describe("listGatewayMethods", () => {
   });
 
   it("appends new methods after model probing without shifting older method indices", () => {
-    expect(listGatewayMethods().slice(-54)).toEqual([
+    expect(listGatewayMethods().slice(-60)).toEqual([
       "models.probe",
       "migrations.memory.plan",
       "migrations.memory.apply",
@@ -125,7 +126,13 @@ describe("listGatewayMethods", () => {
       "portal.list",
       "portal.open",
       "portal.close",
-      "delivery.failures.resubmit",
+      "sessions.move",
+      "sessions.assignOwner",
+      "progressCard.get",
+      "progressCard.put",
+      "tools.github.status",
+      "tools.github.configure",
+      "diagnostics.lanes",
     ]);
     const methods = listGatewayMethods();
     expect(methods.indexOf("node.pluginSurface.refresh")).toBe(
@@ -231,7 +238,7 @@ describe("listGatewayMethods", () => {
       "exec.approval.get",
     ]);
     expect(methods).toContain("tts.speak");
-    expect(coreMethods.slice(-61)).toEqual([
+    expect(coreMethods.slice(-67)).toEqual([
       "sessions.catalog.continue",
       "sessions.catalog.archive",
       "approval.get",
@@ -292,7 +299,13 @@ describe("listGatewayMethods", () => {
       "portal.list",
       "portal.open",
       "portal.close",
-      "delivery.failures.resubmit",
+      "sessions.move",
+      "sessions.assignOwner",
+      "progressCard.get",
+      "progressCard.put",
+      "tools.github.status",
+      "tools.github.configure",
+      "diagnostics.lanes",
     ]);
     expect(methods.indexOf("approval.get")).toBeGreaterThan(methods.indexOf("tts.speak"));
     expect(methods.indexOf("approval.resolve")).toBe(methods.indexOf("approval.get") + 1);
@@ -329,7 +342,10 @@ describe("listGatewayMethods", () => {
     expect(methods.indexOf("portal.list")).toBe(methods.indexOf("device.scopes.waitUpgrade") + 1);
     expect(methods.indexOf("portal.open")).toBe(methods.indexOf("portal.list") + 1);
     expect(methods.indexOf("portal.close")).toBe(methods.indexOf("portal.open") + 1);
-    expect(methods.indexOf("delivery.failures.resubmit")).toBe(methods.indexOf("portal.close") + 1);
+    expect(methods.indexOf("sessions.move")).toBe(methods.indexOf("portal.close") + 1);
+    expect(methods.indexOf("sessions.assignOwner")).toBe(methods.indexOf("sessions.move") + 1);
+    expect(methods.indexOf("progressCard.get")).toBe(methods.indexOf("sessions.assignOwner") + 1);
+    expect(methods.indexOf("progressCard.put")).toBe(methods.indexOf("progressCard.get") + 1);
   });
 
   it("advertises the versioned Talk session RPCs", () => {
