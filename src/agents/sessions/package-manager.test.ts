@@ -70,7 +70,7 @@ describe("DefaultPackageManager", () => {
 
   it("keeps manifest resource entries in directories starting with two dots", async () => {
     // `..cache` is an ordinary child directory; only a `..` path segment escapes.
-    const root = await makeTempDir("openclaw-package-manager-");
+    const root = tempDirs.make("openclaw-package-manager-");
     const packageRoot = join(root, "package");
     const outsideRoot = join(root, "outside");
     // The two-dot directory sits directly under the package root, so the path
