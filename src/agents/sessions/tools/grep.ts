@@ -75,7 +75,7 @@ export interface GrepToolOptions {
 
 function formatGrepCall(
   args: { pattern: string; path?: string; glob?: string; limit?: number } | undefined,
-  theme: typeof import("../../modes/interactive/theme/theme.js").theme,
+  theme: typeof import("../../modes/interactive/theme/theme.js").interactiveAgentTheme,
 ): string {
   const pattern = str(args?.pattern);
   const rawPath = str(args?.path);
@@ -103,7 +103,7 @@ function formatGrepResult(
     details?: GrepToolDetails;
   },
   options: ToolRenderResultOptions,
-  theme: typeof import("../../modes/interactive/theme/theme.js").theme,
+  theme: typeof import("../../modes/interactive/theme/theme.js").interactiveAgentTheme,
   showImages: boolean,
 ): string {
   const matchLimit = result.details?.matchLimitReached;

@@ -63,10 +63,6 @@ function resolveExistingHostWorkdir(workdir: string): string | null {
   return stats?.isDirectory() ? workdir : null;
 }
 
-function isHostPathInsideRoot(params: { root: string; candidate: string }): boolean {
-  return isPathInside(params.root, params.candidate);
-}
-
 function safeCurrentCwd(): string | null {
   try {
     return process.cwd();
@@ -272,12 +268,7 @@ function resolveBackendHostWorkdirCandidate(params: {
   if (readOnlySkillMapping) {
     return { ...readOnlySkillMapping, failIfInvalid: false };
   }
-  if (
-    isHostPathInsideRoot({
-      root: params.sandbox.workspaceDir,
-      candidate: hostPath,
-    })
-  ) {
+  if (isPathInside(path.resolve(params.sandbox.workspaceDir), hostPath)) {
     return {
       hostPath,
       hostRoot: path.resolve(params.sandbox.workspaceDir),
