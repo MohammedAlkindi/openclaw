@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { RequestedModelUnsupportedError } from "acpx/runtime";
+import { createDeferred } from "openclaw/plugin-sdk/extension-shared";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   AcpRuntimeError,
@@ -27,7 +28,7 @@ type TestSessionStore = {
 
 const DOCUMENTED_OPENCLAW_BRIDGE_COMMAND =
   "env OPENCLAW_HIDE_BANNER=1 OPENCLAW_SUPPRESS_NOTES=1 openclaw acp --url ws://127.0.0.1:18789 --token-file ~/.openclaw/gateway.token --session agent:main:main";
-const CODEX_ACP_COMMAND = "npx @agentclientprotocol/codex-acp@1.1.2";
+const CODEX_ACP_COMMAND = "npx @agentclientprotocol/codex-acp@1.4.0";
 const CODEX_ACP_WRAPPER_COMMAND = `node "/tmp/openclaw/acpx/codex-acp-wrapper.mjs"`;
 const CODEX_ACP_WRAPPER_COMMAND_WITH_LEASE = `${CODEX_ACP_WRAPPER_COMMAND} ${OPENCLAW_ACPX_LEASE_ID_ARG} lease-close ${OPENCLAW_GATEWAY_INSTANCE_ID_ARG} gateway-test`;
 const LOCAL_NODE_MODULES_CODEX_COMMAND = `node "${path.resolve(
@@ -938,6 +939,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
   });
 
   it("adds Codex wrapper stderr tail to generic startTurn failure results", async () => {
+    const promptStarted = createDeferred<void>();
     const wrapperRoot = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-acpx-runtime-"));
     await fs.writeFile(
       path.join(wrapperRoot, "codex-acp-wrapper.stderr.lease-start-turn.log"),
@@ -963,6 +965,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
     vi.spyOn(delegate, "startTurn").mockImplementation(
       (input): AcpRuntimeTurn => ({
         requestId: input.requestId,
+        promptStarted: promptStarted.promise,
         events: (async function* () {
           yield {
             type: "text_delta" as const,
@@ -993,10 +996,19 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       mode: "prompt",
       requestId: "turn-1",
     });
+    expect(turn.promptStarted).toBeDefined();
+    let submitted = false;
+    const observedPromptStarted = turn.promptStarted.then(() => {
+      submitted = true;
+    });
     const events: AcpRuntimeEvent[] = [];
     for await (const event of turn.events) {
       events.push(event);
     }
+    expect(submitted).toBe(false);
+    promptStarted.resolve();
+    await observedPromptStarted;
+    expect(submitted).toBe(true);
 
     await expect(turn.result).resolves.toMatchObject({
       status: "failed",
@@ -1054,6 +1066,13 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       requestId: "turn-1",
     });
 
+    const promptStarted = turn.promptStarted;
+    expect(promptStarted).toBeDefined();
+    await expect(promptStarted).rejects.toMatchObject({
+      name: "AcpRuntimeError",
+      code: "ACP_TURN_FAILED",
+      message: expect.stringContaining("adapter failed before returning turn"),
+    });
     await expect(turn.result).rejects.toMatchObject({
       name: "AcpRuntimeError",
       code: "ACP_TURN_FAILED",
@@ -1082,6 +1101,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
     const startTurn = vi.spyOn(delegate, "startTurn").mockImplementation(
       (input): AcpRuntimeTurn => ({
         requestId: input.requestId,
+        promptStarted: Promise.resolve(),
         events: (async function* () {
           yield { type: "done" as const, stopReason: "end_turn" };
         })(),
@@ -1275,7 +1295,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
         reasoningEffort: "medium",
       }),
     ).toBe(
-      `npx @agentclientprotocol/codex-acp@1.1.2 ${OPENCLAW_CODEX_CONFIG_ARG} '{"model":"gpt-5.4","model_reasoning_effort":"medium"}'`,
+      `npx @agentclientprotocol/codex-acp@1.4.0 ${OPENCLAW_CODEX_CONFIG_ARG} '{"model":"gpt-5.4","model_reasoning_effort":"medium"}'`,
     );
     expect(testing.isCodexAcpCommand("openclaw acp")).toBe(false);
     expect(testing.normalizeAgentCommand(["node", "/tmp/codex acp/index.js", "--label", ""])).toBe(
@@ -2780,6 +2800,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       });
       return {
         requestId: input.requestId,
+        promptStarted: Promise.resolve(),
         events: (async function* () {})(),
         result: Promise.resolve({ status: "completed" }),
         cancel: vi.fn(async () => {}),
@@ -2827,6 +2848,7 @@ describe("AcpxRuntime fresh reset wrapper", () => {
       expectPendingLease();
       return {
         requestId: input.requestId,
+        promptStarted: Promise.resolve(),
         events: (async function* () {})(),
         result: Promise.resolve({ status: "completed" }),
         cancel: vi.fn(async () => {}),
