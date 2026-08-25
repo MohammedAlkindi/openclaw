@@ -8,6 +8,7 @@ import {
   readOpenClawAgentDatabaseRegistryToken,
   readOpenIncognitoAgentDatabaseGeneration,
 } from "../../state/openclaw-agent-db.js";
+import { operatorSessionCap } from "../operator-role-policy.js";
 import { readSessionAutomationVersion } from "../session-automation-index.js";
 import { readSessionLifecyclePersistenceVersion } from "../session-lifecycle-state.js";
 import { isGatewayAdmin } from "../session-sharing.js";
@@ -29,6 +30,7 @@ type SessionListFence = {
   sessionTranscriptUpdateVersion: number;
   titleProjectionUnavailableVersion: number;
   workerPlacementDiskSpaceVersion: number;
+  workerPlacementRunnerAvailabilityVersion: number;
 };
 type SessionListOperation = SessionListFence & { promise: Promise<SessionsListResult> };
 type SessionListCompleted = SessionListFence & { expiresAt?: number; result: SessionsListResult };
@@ -91,6 +93,8 @@ function readSessionListFence(
     sessionTranscriptUpdateVersion: readSessionTranscriptUpdateVersion(),
     titleProjectionUnavailableVersion: readSessionTitleProjectionUnavailableVersion(),
     workerPlacementDiskSpaceVersion: context.workerPlacementDiskSpaceReader?.version() ?? 0,
+    workerPlacementRunnerAvailabilityVersion:
+      context.workerPlacementRunnerAvailabilityReader?.version() ?? 0,
   };
 }
 
@@ -106,21 +110,34 @@ function matchesSessionListFence(value: SessionListFence, fence: SessionListFenc
     value.sessionsMutationVersion === fence.sessionsMutationVersion &&
     value.sessionTranscriptUpdateVersion === fence.sessionTranscriptUpdateVersion &&
     value.titleProjectionUnavailableVersion === fence.titleProjectionUnavailableVersion &&
-    value.workerPlacementDiskSpaceVersion === fence.workerPlacementDiskSpaceVersion
+    value.workerPlacementDiskSpaceVersion === fence.workerPlacementDiskSpaceVersion &&
+    value.workerPlacementRunnerAvailabilityVersion ===
+      fence.workerPlacementRunnerAvailabilityVersion
   );
 }
 
-function sessionListVisibilityIdentity(client: GatewayClient | null): string {
+function sessionListVisibilityIdentity(
+  client: GatewayClient | null,
+  config: OpenClawConfig,
+): string {
   if (isGatewayAdmin(client)) {
     return "admin";
   }
   const profileId = gatewayClientSessionCreator(client)?.id;
-  return profileId ? `profile:${profileId}` : "anonymous";
+  if (!profileId) {
+    return "anonymous";
+  }
+  const sessionPolicy = operatorSessionCap(client, config);
+  return sessionPolicy ? `profile:${profileId}:sessions:${sessionPolicy}` : `profile:${profileId}`;
 }
 
-function sessionListWorkKey(params: SessionsListParams, client: GatewayClient | null): string {
+function sessionListWorkKey(
+  params: SessionsListParams,
+  client: GatewayClient | null,
+  config: OpenClawConfig,
+): string {
   return JSON.stringify([
-    sessionListVisibilityIdentity(client),
+    sessionListVisibilityIdentity(client, config),
     Object.entries(params).toSorted(([left], [right]) => left.localeCompare(right)),
   ]);
 }
@@ -181,7 +198,7 @@ export async function respondWithCachedSessionList(params: {
   respond: RespondFn;
   run: () => Promise<SessionsListResult>;
 }): Promise<void> {
-  const workKey = sessionListWorkKey(params.request, params.client);
+  const workKey = sessionListWorkKey(params.request, params.client, params.config);
   const state = sessionListState(params.context, params.config);
   // Every input that can change a projected row must fence reuse. Session identity,
   // Gateway projection, and live-run mutations have separate monotonic owners.
