@@ -73,11 +73,13 @@ export type SidebarLifecycleState = HTMLElement & {
   sidebarLiveActivity: boolean;
   onUpdateSidebarEntries?: (entries: string[]) => void;
   pinnedAgentIds: readonly string[];
+  readonly sessionOwnerFilterId: string | null;
   sessionKey: string;
   onNavigate: (
     routeId: string,
     options?: { pathname?: string; search?: string; hash?: string },
   ) => void;
+  dismissTransientMenus: () => boolean;
   readonly sessionData: SessionDataController;
   readonly sessionOrganizer: SessionOrganizerController;
   listSessionGroupFolders(path?: string): Promise<{
