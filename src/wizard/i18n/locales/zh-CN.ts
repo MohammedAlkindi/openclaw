@@ -250,7 +250,7 @@ export const zh_CN = {
       directAccessTitle: "直接远程访问",
       enterUrlManually: "手动输入 URL",
       foundGateways: "找到 {count} 个 Gateway",
-      fingerprintMissing: "未公布（连接不会固定指纹）",
+      fingerprintMissing: "未公布",
       gatewayPasswordStoredMessage: "这个 Gateway 密码存在哪里？",
       gatewayTokenStoredMessage: "这个 Gateway 令牌存在哪里？",
       insecureRemoteUrl:
@@ -1103,8 +1103,6 @@ export const zh_CN = {
       gatewayServiceRestarted: "Gateway 服务已重启。",
       gatewayServiceRestarting: "正在重启 Gateway 服务...",
       gatewayServiceRestartScheduled: "Gateway 服务重启已排队。",
-      gatewayServiceUninstalled: "Gateway 服务已卸载。",
-      gatewayServiceUninstalling: "正在卸载 Gateway 服务...",
       gatewayTokenGenerate: "生成令牌：{command}",
       gatewayTokenShared: "Gateway 令牌：Gateway 和 Control UI 的共享认证。",
       gatewayTokenStored:

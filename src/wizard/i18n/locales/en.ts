@@ -252,7 +252,7 @@ export const en = {
       directAccessTitle: "Direct remote",
       enterUrlManually: "Enter URL manually",
       foundGateways: "Found {count} gateway(s)",
-      fingerprintMissing: "not advertised (connection will not be pinned)",
+      fingerprintMissing: "not advertised",
       gatewayPasswordStoredMessage: "Where is this gateway password stored?",
       gatewayTokenStoredMessage: "Where is this gateway token stored?",
       insecureRemoteUrl:
@@ -1140,8 +1140,6 @@ export const en = {
       gatewayServiceRestarted: "Gateway service restarted.",
       gatewayServiceRestarting: "Restarting Gateway service...",
       gatewayServiceRestartScheduled: "Gateway service restart scheduled.",
-      gatewayServiceUninstalled: "Gateway service uninstalled.",
-      gatewayServiceUninstalling: "Uninstalling Gateway service...",
       gatewayTokenGenerate: "Generate token: {command}",
       gatewayTokenShared: "Gateway token: shared auth for the Gateway + Control UI.",
       gatewayTokenStored:

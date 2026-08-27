@@ -242,12 +242,25 @@ export const en: TranslationMap = {
     widgetUnavailable: "Session progress is unavailable.",
     widgetAccessDenied: "Select a session you can access or change sharing for this session.",
     countLabel: "{completed} of {total} completed",
-    lastActivity: "Last activity: {time}",
+    activity: {
+      updated: "Updated {time}",
+      completed: "Completed {time}",
+      failed: "Failed {time}",
+      stopped: "Stopped {time}",
+    },
+    outcome: {
+      completed: "Completed",
+      failed: "Failed",
+      stopped: "Stopped",
+    },
     stepLabel: "{step}, {status}",
     status: {
       completed: "completed",
+      failed: "failed",
       inProgress: "in progress",
+      paused: "paused",
       pending: "pending",
+      stopped: "stopped",
     },
     receipt: {
       updating: "Updating progress",
@@ -1238,8 +1251,6 @@ export const en: TranslationMap = {
     newGroupStale: "Gateway connection replaced before the group was saved. Try again.",
     newGroupMoveSkipped:
       "Group created, but the move was skipped because the list changed. Move from the row menu.",
-    newGroupMovePartial:
-      "Group created, but some selected sessions were not moved because the list changed. Move them from the row menu.",
     moveToGroup: "Move session to a group",
     moveToGroupMenu: "Move to group",
     moveToGroupMenuCount: "Move {count} to group",
@@ -1756,6 +1767,7 @@ export const en: TranslationMap = {
   },
   configView: {
     adminRequired: "Configuration changes require operator.admin access.",
+    channelSettings: "Channel settings",
     categories: {
       core: "Core",
       ai: "Agent Defaults",
@@ -1821,6 +1833,18 @@ export const en: TranslationMap = {
         label: "Absolutely",
         description: "Clay on graphite",
       },
+      tide: {
+        label: "Tide",
+        description: "Slate & steel",
+      },
+      beacon: {
+        label: "Beacon",
+        description: "Maximum contrast",
+      },
+      phosphor: {
+        label: "Phosphor",
+        description: "Green on glass",
+      },
     },
     textSizes: {
       small: "Small",
@@ -1829,6 +1853,7 @@ export const en: TranslationMap = {
       xl: "XL",
       xxl: "XXL",
     },
+    profileSyncedHint: "Saved to your profile — follows you on every device.",
     syncedHint: "Synced across your devices through the gateway.",
     syncPendingHint: "Waiting to sync through the gateway.",
     notifications: {
@@ -1873,6 +1898,8 @@ export const en: TranslationMap = {
       accent: "Accent color",
       accentHint: "Choose an accent color for buttons, highlights, and other controls.",
       customAccent: "Custom color",
+      usingInheritedAccent: "Using inherited accent",
+      usingAccent: "Using {value}",
       accents: {
         default: "Theme default",
         claw: "Claw red",
@@ -2602,7 +2629,6 @@ export const en: TranslationMap = {
     idleFact: "Idle stop: {value}",
     desktopFact: "Desktop: {value}",
     providerList: "View supported backends",
-    customClass: "Custom…",
     fields: {
       profileId: "Profile ID",
       profileIdHelp: "Use letters, numbers, hyphens, or underscores.",
@@ -2610,9 +2636,8 @@ export const en: TranslationMap = {
       backendHelp: "The backend passed to Crabbox, such as AWS or Hetzner.",
       backendPlaceholder: "hetzner",
       machineClass: "Machine class",
-      machineClassHelp: "Choose a portable class or enter an exact provider instance type.",
-      customClass: "Custom machine class",
-      customClassPlaceholder: "c7a.24xlarge",
+      machineClassHelp:
+        "Enter a class accepted by the selected Crabbox backend and binary. The provider determines its effective sizing.",
       ttl: "Max lifetime",
       ttlHelp: "Use a positive Go duration such as 8h or 90m.",
       ttlPlaceholder: "8h",
@@ -2638,7 +2663,7 @@ export const en: TranslationMap = {
       profileExists: "Choose another profile ID; this one already exists.",
       profileMissing: "This profile changed or was removed. Reload the page and try again.",
       backend: "Enter a Crabbox backend, such as aws or hetzner.",
-      machineClass: "Choose a machine class or enter an instance type up to 128 characters.",
+      machineClass: "Enter a machine class of 1 to 128 characters.",
       ttl: "Enter a positive Go duration for max lifetime, such as 8h or 90m.",
       idleTimeout: "Enter a positive Go duration for idle stop, such as 45m.",
       binary: "Enter an absolute Crabbox binary path or leave the field empty.",
@@ -3370,6 +3395,7 @@ export const en: TranslationMap = {
     detailCategory: "Category",
     detailPackage: "Package",
     detailPluginId: "Plugin ID",
+    capabilities: "Capabilities",
     offlineTitle: "Gateway offline",
     offlineBody: "Connect to browse installed and recommended plugins.",
     optionalCapability: "Optional OpenClaw capability.",
@@ -3561,6 +3587,27 @@ export const en: TranslationMap = {
   },
   presence: {
     rosterTitle: "Online",
+    card: {
+      details: "Details for {name}",
+      loadFailed: "Could not open details. Try again, or open this person’s Activity page.",
+      ariaLabel: "Activity for {name}",
+      person: "Person",
+      onlineFor: "Online for",
+      where: "Where",
+      reportedTimeZone: "Reported time zone: {zone}",
+      lastActivity: "Last activity",
+      notObserved: "Not observed yet",
+      viewingNow: "Viewing now",
+      recentSessions: "Recent sessions",
+      noVisibleSessions: "No visible sessions being viewed.",
+      noRecentSessions: "No recent visible sessions.",
+      sessionUpdated: "Session updated",
+      ago: "ago",
+      viewActivity: "View activity",
+      controlUi: "Control UI",
+      cli: "Command line",
+      app: "App",
+    },
   },
   activityFeed: {
     sessionsMode: "Sessions",
@@ -4251,6 +4298,7 @@ export const en: TranslationMap = {
     eventStale: "Stale session",
   },
   connection: {
+    disconnectedTitle: "Disconnected",
     queuedCount: "{count} queued",
     reconnecting: "Reconnecting…",
     restarting: "Restarting…",
@@ -5168,6 +5216,8 @@ export const en: TranslationMap = {
   },
   chat: {
     cloudWorkerFailed: "Runner failed: {error}",
+    errorDetails: "Error details",
+    copyError: "Copy error",
     diskSpace: {
       warningTitle: "Cloud session disk space is low",
       criticalTitle: "Cloud session disk space is critically low",
@@ -5558,6 +5608,10 @@ export const en: TranslationMap = {
       gatewayRestarted: {
         label: "System · gateway restarted",
       },
+      cliHarnessContext: {
+        label: "System · injected context",
+      },
+      showContent: "Show content",
     },
     progressLabels: {
       shelling: "Shelling",
@@ -5705,6 +5759,10 @@ export const en: TranslationMap = {
       eyebrow: "Question",
       summaryLabel: "Question outcome",
       ownAnswerFor: "Your own answer for {header}",
+      storeRequestedBy: "Requested by {agent} · {session}",
+      storeEntry: "Stores {name} as {kind}",
+      storeReplacement: "Replaces {name} — last updated {updated}",
+      storeReplacementBy: "Replaces {name} — last updated {updated} by {updatedBy}",
       submitting: "Submitting…",
       submitFailed: "Could not submit: {error}",
       answered: "Answered",
@@ -5780,9 +5838,8 @@ export const en: TranslationMap = {
       fastMode: "Fast mode",
       searchModels: "Search models",
       noMatchingModels: "No models match your search",
-      sessionOverride: "Session override",
-      resetToDefault: "Reset to default ({model})",
-      useDefault: "Use default",
+      onlyForSession: "Only for this session",
+      useDefaultModel: "Use default ({model})",
       defaultWithModel: "Default ({model})",
       defaultWithLevel: "Default ({level})",
       fastHelp: "Faster responses, higher usage of limits.",
@@ -5960,8 +6017,6 @@ export const en: TranslationMap = {
       runInterrupted: "Interrupted",
       runStatus: "Run status: {status}",
       compactingContext: "Compacting context...",
-      compacting: "Compacting",
-      compact: "Compact",
       contextCompacted: "Context compacted",
       fallbackActive: "Fallback active: {model}",
       fallbackCleared: "Fallback cleared: {model}",
@@ -5980,7 +6035,6 @@ export const en: TranslationMap = {
       browserAnnotationRemoved: "Browser annotation removed.",
       browserAnnotationUndoUnavailable:
         "Undo is unavailable because the browser annotation limit has been reached.",
-      compactRecommendedContext: "Compact recommended session context",
       removeAttachment: "Remove attachment",
       removeBrowserAnnotation: "Remove browser annotation: {name}",
       addAttachment: "Add attachment",
