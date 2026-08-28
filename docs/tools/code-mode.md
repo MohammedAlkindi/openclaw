@@ -186,8 +186,9 @@ try {
 
 JavaScript syntax errors, TypeScript transform errors, and tool failures proven
 to occur before execution become failed `exec` results that the model can read
-and correct across successive turns. A failed tool call does not automatically
-end the agent run when OpenClaw can prove that no nested action started.
+and correct across successive turns. A failed `exec` or `wait` does not automatically
+end the agent run when OpenClaw's host execution record proves that no potentially
+mutating nested action started, including before a suspended run resumed.
 
 Catalog search, handle `describe()`, `skills.list()`, and `skills.read()` are
 read-only discovery. A guest error after only these operations still allows
@@ -562,6 +563,10 @@ QuickJS-WASI snapshot/restore is the resume mechanism:
 Snapshots are runtime state, not user artifacts: they live only in an
 in-process map (no database or disk write), are size-limited, expire, and are
 scoped to the run and session that created them.
+Canceling the owning run or tool call, or closing its tool catalog at attempt
+teardown, immediately releases parked snapshots and cancels their pending host
+work, even if no `wait` call follows. Catalog description refreshes and client
+tool additions do not close the owner.
 
 `wait` fails (as a `failed` result) when:
 
@@ -590,6 +595,8 @@ declare function yield_control(reason?: string): Promise<void>;
 ```
 
 Guest timers are bridged through the host, so they survive QuickJS snapshot/resume and remain bounded by the Code Mode execution and snapshot limits.
+`clearTimeout` also cancels a timer created before an earlier suspension; this
+applies to interactive Code Mode and headless automation scripts.
 
 Every effective non-MCP tool is also installed as an async global function.
 The model-visible `exec` description includes a bounded, deterministic subset
@@ -985,13 +992,15 @@ code-mode tool call and the nested tool id.
 
 Nested tool failures cross into the guest as catchable JavaScript errors. If
 guest code does not catch an error, `exec` or `wait` returns a failed tool
-result. In `exec`, proven no-start failures and guest-only errors, including
-errors after read-only discovery, allow ordinary model recovery. A failed `wait`
-still ends ordinary continuation. Possible nested side effects require authorized
-read-only reconciliation before any further action. Network-controlled tool output and
-errors retain their existing untrusted-content wrapping and sanitization;
-recovering from a failure does not grant new permissions or replay completed
-side effects.
+result. Proven no-start failures and errors after only audited read-only work
+allow ordinary model recovery, including when `wait` resumes a suspended cell.
+This proof covers the cell's entire execution, not just the latest resume.
+Failed waits without that host proof remain terminal; serialized result fields
+cannot grant recovery. Possible nested side effects in a failed `exec` require
+authorized read-only reconciliation before any further action. Network-controlled
+tool output and errors retain their existing untrusted-content wrapping and
+sanitization; recovering from a failure does not grant new permissions or replay
+completed side effects.
 
 Parallel nested calls are allowed up to `maxPendingToolCalls`.
 
@@ -1099,11 +1108,17 @@ objects, prototypes, and host functions do not cross into QuickJS.
 
 Each result's `telemetry` field reports: hidden catalog size and a source
 breakdown (`openclaw`/`mcp`/`client` counts), cumulative search/describe/call
-counts for the run's catalog, and the model-visible tool names (`exec`,
-`wait`, and retained direct-only tools).
+counts for the run's catalog, and the code-mode control tool names (`exec` and
+`wait`).
 The `counterScope` identifies one counter lifetime, changing when a catalog is
 replaced or restored but remaining stable when tools are appended or prompt
 policy narrows that catalog.
+
+Catalog teardown retains only these final aggregate diagnostics, not executable
+tools or VM state. If teardown closes a suspended run while `wait` is observing
+pending work, that wait returns `failed` with `code: "aborted"` and the final
+telemetry; pending calls are canceled and the snapshot is dropped. Retained
+diagnostics grant no authority to resume or repair the closed run.
 
 The run metadata (`meta.agentMeta` in `openclaw agent --json`, mirrored on the
 `agent exec --json` envelope) adds per-run stats:
