@@ -1,3 +1,4 @@
+import { PLUGIN_CAPABILITY_CONSENT_REQUIRED } from "../../packages/gateway-protocol/src/capability-consent-error-details.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { resolveNpmSpecMetadata } from "../infra/install-source-utils.js";
 import { parseRegistryNpmSpec } from "../infra/npm-registry-spec.js";
@@ -431,7 +432,6 @@ export async function updateNpmInstalledPlugins(params: {
             pluginId,
             record,
             currentVersion,
-            effectiveSpec,
             recordSpec,
             resolution: metadataResult.metadata,
             updateChannel,
@@ -510,7 +510,12 @@ export async function updateNpmInstalledPlugins(params: {
     if (attempt.kind === "exception") {
       if (attempt.error instanceof ManagedPluginLifecycleError && attempt.error.capabilityConsent) {
         // Staging was rolled back; pending consent must not disable the previous installation.
-        outcomes.push({ pluginId, status: "error", message: attempt.error.message });
+        outcomes.push({
+          pluginId,
+          status: "error",
+          code: PLUGIN_CAPABILITY_CONSENT_REQUIRED,
+          message: attempt.error.message,
+        });
         continue;
       }
       recordFailure(pluginId, attempt.message);
