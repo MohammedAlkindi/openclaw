@@ -338,4 +338,17 @@ describe("detectChangedScope Windows routing", () => {
       expect(detectChangedScope([testPath]).runWindows, testPath).toBe(false);
     }
   });
+
+  it("routes MCP stdio transport owners and their Windows proof to Windows", () => {
+    for (const mcpPath of [
+      "src/agents/mcp-stdio.ts",
+      "src/agents/mcp-stdio-transport.ts",
+      "src/agents/mcp-stdio-transport.windows.test.ts",
+    ]) {
+      expect(detectChangedScope([mcpPath]), mcpPath).toMatchObject({
+        runNode: true,
+        runWindows: true,
+      });
+    }
+  });
 });

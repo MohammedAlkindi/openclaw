@@ -496,4 +496,10 @@ describe("package scripts", () => {
       "extensions/memory-core/src/memory-extra-file-path.windows.test.ts",
     );
   });
+
+  it("runs the MCP stdio transport Windows proof in Windows CI", () => {
+    expect(readWindowsCiCoverageScript()).toContain(
+      "src/agents/mcp-stdio-transport.windows.test.ts",
+    );
+  });
 });
