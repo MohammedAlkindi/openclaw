@@ -9,6 +9,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { ExecMode } from "../infra/exec-approvals.js";
 import type { SkillWorkshopRunOptions } from "../skills/workshop/types.js";
 import type { HookContext } from "./agent-tools.before-tool-call.js";
+import type { PreparedPairedComputerUse } from "./computer-use-node-capabilities.js";
 import type { ConversationRecallContext } from "./conversation-recall.types.js";
 import type { ExecPolicyOverrides, ExecSessionDefaults } from "./exec-defaults.js";
 import type { ModelAwareToolContext } from "./openclaw-tools.model-context.js";
@@ -16,6 +17,7 @@ import type { SandboxFsBridge } from "./sandbox/fs-bridge.js";
 import type { SpawnedToolContext } from "./spawned-context.js";
 import type { ToolFsPolicy } from "./tool-fs-policy.js";
 import type { CronToolOptions } from "./tools/cron-tool.types.js";
+import type { QuestionPromptDelivery } from "./tools/question-prompt-send.js";
 
 export type OpenClawToolsOptions = {
   sandboxBrowserBridgeUrl?: string;
@@ -51,6 +53,10 @@ export type OpenClawToolsOptions = {
   sandboxRoot?: string;
   sandboxContainerWorkdir?: string;
   sandboxFsBridge?: SandboxFsBridge;
+  /** Producer-authored bare upload handles mapped to exact sandbox paths. */
+  stagedMediaPaths?: ReadonlyMap<string, string>;
+  /** Prepared effective read authorization for exporting sandbox workspace media. */
+  sandboxWorkspaceMediaReadAllowed?: boolean;
   fsPolicy?: ToolFsPolicy;
   sandboxed?: boolean;
   config?: OpenClawConfig;
@@ -60,8 +66,12 @@ export type OpenClawToolsOptions = {
   webSearchEnabled?: boolean;
   /** Capabilities declared by the gateway client that originated this run. */
   clientCaps?: string[];
+  /** Host-admitted dashboard authoring without an originating inline renderer. */
+  pinnedWidgetAuthoring?: boolean;
   pluginToolAllowlist?: string[];
   pluginToolDenylist?: string[];
+  /** Prepared profile authority for the gateway tool's configuration-read actions. */
+  gatewayConfigReadAllowed?: boolean;
   runtimeToolAllowlist?: string[];
   /** Host-prepared proof that this exact session can request Gateway publication. */
   githubPublicationAvailable?: boolean;
@@ -92,6 +102,8 @@ export type OpenClawToolsOptions = {
   sameChannelThreadRequired?: boolean;
   /** Mutable model-context generation used to expire screenshot coordinate frames. */
   computerContextEpoch?: { value: number };
+  computerTransport?: import("./tools/computer-tool.js").ComputerToolTransport | null;
+  pairedNodeComputerUse?: PreparedPairedComputerUse;
   /** Registers run-owned cleanup for tools that hold node resources. */
   registerRunCleanup?: (cleanup: (reason: string) => Promise<void>) => void;
   /** Internal review-run restrictions and proposal provenance. */
@@ -148,6 +160,13 @@ export type OpenClawToolsOptions = {
   spawnWorkspaceDir?: string;
   /** Current runtime directory used as the default project for follow-up suggestions. */
   cwd?: string;
+  /**
+   * How this run shows a blocking question tool's prompt. Harnesses that run tools
+   * through the embedded tool lifecycle reserve the prompt themselves and leave this
+   * unset; harnesses that dispatch tools directly pass it so the question still
+   * reaches the person being asked.
+   */
+  questionPrompt?: QuestionPromptDelivery;
   onYield?: (message: string, acknowledgment?: string) => Promise<void> | void;
   claimYieldCompletion?: () => boolean | Promise<boolean>;
   /** Allow plugin tools for this tool set to late-bind the gateway subagent. */

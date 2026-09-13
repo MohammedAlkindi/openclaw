@@ -3,9 +3,18 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useAutoCleanupTempDirTracker } from "../../test/helpers/temp-dir.js";
+import { testing as cliBackendsTesting } from "../agents/cli-backends.test-support.js";
+import { buildStatusCommandOverviewRows } from "../commands/status-overview-rows.ts";
+import { collectStatusLocalSnapshot } from "../commands/status.agent-local.js";
+import { createStatusCommandOverviewRowsParams } from "../commands/status.test-support.ts";
 import { clearRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
-import { upsertSessionEntryCore } from "../config/sessions/session-accessor.js";
+import * as sessionAccessor from "../config/sessions/session-accessor.js";
+import {
+  replaceSessionEntry,
+  replaceSessionEntrySync,
+  upsertSessionEntryCore,
+} from "../config/sessions/session-accessor.js";
 import { resolveSqliteTargetFromSessionStorePath } from "../config/sessions/session-sqlite-target.js";
 import { getActivePluginRegistry, setActivePluginRegistry } from "../plugins/runtime.js";
 import { closeOpenClawAgentDatabasesForTest } from "../state/openclaw-agent-db.js";
@@ -15,6 +24,7 @@ import {
   createOutboundTestPlugin,
   createTestRegistry,
 } from "../test-utils/channel-plugins.js";
+import { withEnvAsync } from "../test-utils/env.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { getStatusSummary } from "./summary.js";
 
@@ -43,6 +53,7 @@ describe("getStatusSummary read-only session access", () => {
   });
 
   afterEach(() => {
+    cliBackendsTesting.resetDepsForTest();
     closeOpenClawAgentDatabasesForTest();
     closeOpenClawStateDatabaseForTest();
   });
@@ -95,46 +106,79 @@ describe("getStatusSummary read-only session access", () => {
     },
   );
 
-  it("reports and aggregates fixed logical stores by their physical SQLite targets", async () => {
-    const tempDir = tempDirs.make("openclaw-status-session-stores-");
-    const storePath = path.join(tempDir, "sessions.json");
-    const config = {
-      agents: {
-        defaults: { systemAgent: { agentId: "main" } },
-        list: [{ id: "main", default: true }, { id: "ops" }],
-      },
-      session: { store: storePath },
-    };
+  it.each(["sessions.json", "shared.sqlite"])(
+    "reports each agent's activity and reads each physical session store once for %s",
+    async (fileName) => {
+      const tempDir = tempDirs.make("openclaw-status-session-stores-");
+      const storePath = path.join(tempDir, fileName);
+      const config = {
+        agents: {
+          defaults: { systemAgent: { agentId: "main" } },
+          list: [{ id: "main", default: true }, { id: "ops" }],
+        },
+        session: { store: storePath },
+      };
 
-    try {
-      for (const agentId of ["main", "ops"]) {
-        const logicalPath = resolveSessionStorePathCore(config.session.store, { agentId });
-        await upsertSessionEntryCore(
-          { agentId, sessionKey: `agent:${agentId}:main`, storePath: logicalPath },
-          { sessionId: `${agentId}-session`, updatedAt: 10 },
+      try {
+        for (const agentId of ["main", "ops"]) {
+          const logicalPath = resolveSessionStorePathCore(config.session.store, { agentId });
+          await replaceSessionEntry(
+            { agentId, sessionKey: `agent:${agentId}:main`, storePath: logicalPath },
+            { sessionId: `${agentId}-session`, updatedAt: agentId === "main" ? 10 : 20 },
+          );
+        }
+        closeOpenClawAgentDatabasesForTest();
+
+        const expectedPaths = ["main", "ops"].map(
+          (agentId) => resolveSqliteTargetFromSessionStorePath(storePath, { agentId }).path,
         );
+        const uniquePaths = [...new Set(expectedPaths)];
+        const readSummary = vi.spyOn(sessionAccessor, "readSessionStoreSummaryReadOnly");
+        const now = vi.spyOn(Date, "now").mockReturnValue(100);
+        try {
+          const summary = await getStatusSummary({ includeChannelSummary: false, config });
+
+          expect(summary.sessions.count).toBe(2);
+          expect(summary.sessions.paths).toEqual(uniquePaths);
+          expect(
+            summary.sessions.byAgent.map((agent) => [
+              agent.agentId,
+              agent.path,
+              agent.count,
+              agent.recent.map((session) => [session.agentId, session.key]),
+            ]),
+          ).toEqual([
+            ["main", expectedPaths[0], 1, [["main", "agent:main:main"]]],
+            ["ops", expectedPaths[1], 1, [["ops", "agent:ops:main"]]],
+          ]);
+          expect(readSummary).toHaveBeenCalledTimes(uniquePaths.length);
+
+          readSummary.mockClear();
+          const { agentStatus: local } = await collectStatusLocalSnapshot(config);
+          expect(local.totalSessions).toBe(2);
+          expect(
+            local.agents.map((agent) => [
+              agent.id,
+              agent.sessionsCount,
+              agent.lastUpdatedAt,
+              agent.lastActiveAgeMs,
+            ]),
+          ).toEqual([
+            ["main", 1, 10, 90],
+            ["ops", 1, 20, 80],
+          ]);
+          expect(readSummary).toHaveBeenCalledTimes(uniquePaths.length);
+          expect(uniquePaths.every((databasePath) => fs.existsSync(databasePath))).toBe(true);
+        } finally {
+          readSummary.mockRestore();
+          now.mockRestore();
+        }
+      } finally {
+        closeOpenClawAgentDatabasesForTest();
+        closeOpenClawStateDatabaseForTest();
       }
-      closeOpenClawAgentDatabasesForTest();
-
-      const summary = await getStatusSummary({ includeChannelSummary: false, config });
-      const expectedPaths = ["main", "ops"].map(
-        (agentId) => resolveSqliteTargetFromSessionStorePath(storePath, { agentId }).path,
-      );
-
-      expect(summary.sessions.count).toBe(2);
-      expect(summary.sessions.paths).toEqual(expectedPaths);
-      expect(
-        summary.sessions.byAgent.map((agent) => [agent.agentId, agent.path, agent.count]),
-      ).toEqual([
-        ["main", expectedPaths[0], 1],
-        ["ops", expectedPaths[1], 1],
-      ]);
-      expect(expectedPaths.every((databasePath) => fs.existsSync(databasePath))).toBe(true);
-    } finally {
-      closeOpenClawAgentDatabasesForTest();
-      closeOpenClawStateDatabaseForTest();
-    }
-  });
+    },
+  );
 
   it("does not reread ambient config while projecting prepared session runtime state", async () => {
     await withOpenClawTestState(
@@ -160,5 +204,238 @@ describe("getStatusSummary read-only session access", () => {
         }
       },
     );
+  });
+
+  it("shares one local session snapshot across the complete status scan", async () => {
+    await withOpenClawTestState({ prefix: "openclaw-status-scan-snapshot-" }, async (state) => {
+      const config = {
+        agents: { defaults: { heartbeat: { every: "0m" } }, entries: { main: {} } },
+        gateway: { mode: "remote" as const, remote: { url: "ws://127.0.0.1:1", token: "fixture" } },
+        plugins: { enabled: false },
+      };
+      await state.writeConfig(config);
+      const storePath = resolveSessionStorePathCore(undefined, { agentId: "main", env: state.env });
+      for (let index = 1; index <= 12; index += 1) {
+        replaceSessionEntrySync(
+          { agentId: "main", storePath, sessionKey: `agent:main:scan-${index}` },
+          {
+            sessionId: `scan-${index}`,
+            updatedAt: index,
+            skillsSnapshot: { prompt: "private fixture", skills: [] },
+          },
+        );
+      }
+      const readSummary = vi.spyOn(sessionAccessor, "readSessionStoreSummaryReadOnly");
+      try {
+        const { scanStatus } = await import("../commands/status.scan.js");
+        const timeline = state.path("status-timeline.jsonl");
+        const scan = await withEnvAsync(
+          { OPENCLAW_DIAGNOSTICS: "timeline", OPENCLAW_DIAGNOSTICS_TIMELINE_PATH: timeline },
+          () => scanStatus({ timeoutMs: 100 }),
+        );
+        expect(scan.agentStatus.totalSessions).toBe(12);
+        expect(scan.agentStatus.agents[0]?.lastUpdatedAt).toBe(12);
+        expect(scan.summary.sessions.count).toBe(12);
+        expect(scan.summary.sessions.recent.map(({ key }) => key)).toEqual(
+          Array.from({ length: 10 }, (_, index) => `agent:main:scan-${12 - index}`),
+        );
+        expect(readSummary).toHaveBeenCalledOnce();
+        expect(JSON.stringify(scan)).not.toContain("private fixture");
+        expect(scan).not.toHaveProperty("sessionStores");
+        (await import("../infra/diagnostics-timeline.js")).flushDiagnosticsTimeline();
+        const timings = fs.readFileSync(timeline, "utf8");
+        for (const stage of [
+          "status.config",
+          "status.gateway-probe",
+          "status.session-stores",
+          "status.summary",
+        ]) {
+          expect(timings).toContain(`"stage":"${stage}"`);
+        }
+      } finally {
+        readSummary.mockRestore();
+      }
+    });
+  });
+
+  it("keeps an authored context cap through a runtime provider alias", async () => {
+    cliBackendsTesting.setDepsForTest({
+      resolvePluginSetupCliBackend: ({ backend }) =>
+        backend === "claude-cli"
+          ? {
+              pluginId: "anthropic",
+              backend: {
+                id: "claude-cli",
+                modelProvider: "anthropic",
+                config: { command: "claude" },
+                bundleMcp: false,
+              },
+            }
+          : undefined,
+      resolvePluginSetupRegistry: () => {
+        throw new Error("setup registry should not load for a targeted runtime alias");
+      },
+      resolveRuntimeCliBackends: () => [],
+    });
+    await withOpenClawTestState({ prefix: "openclaw-status-runtime-alias-cap-" }, async (state) => {
+      const storePath = resolveSessionStorePathCore(undefined, {
+        agentId: "main",
+        env: state.env,
+      });
+      const config = {
+        agents: { defaults: { model: "anthropic/claude-opus-5" } },
+        models: {
+          providers: {
+            anthropic: {
+              baseUrl: "https://api.anthropic.com",
+              models: [
+                {
+                  id: "claude-opus-5",
+                  name: "Claude Opus 5",
+                  reasoning: true,
+                  input: ["text" as const],
+                  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+                  contextWindow: 1_000_000,
+                  contextTokens: 272_000,
+                  maxTokens: 8_192,
+                },
+              ],
+            },
+          },
+        },
+        session: { store: storePath },
+      };
+      await upsertSessionEntryCore(
+        { agentId: "main", sessionKey: "agent:main:main", storePath },
+        {
+          sessionId: "runtime-alias-authored-cap",
+          updatedAt: 10,
+          modelProvider: "claude-cli",
+          model: "claude-opus-5",
+          agentHarnessId: "claude-cli",
+          contextTokens: 272_000,
+          contextTokensSource: "resolved",
+          totalTokens: 121_000,
+          totalTokensFresh: true,
+          totalTokensVersion: 1,
+        },
+      );
+      closeOpenClawAgentDatabasesForTest();
+
+      const summary = await getStatusSummary({ includeChannelSummary: false, config });
+      const session = summary.sessions.recent[0];
+
+      expect(session?.contextTokens).toBe(272_000);
+      expect(session?.percentUsed).toBe(44);
+    });
+  });
+
+  it.each([false, true])(
+    "labels archived and retired shared-store rows as stored (all archived: %s)",
+    async (allArchived) => {
+      await withOpenClawTestState({ prefix: "openclaw-status-stored-count-" }, async (state) => {
+        const storePath = state.path("shared.sqlite");
+        const config = {
+          agents: {
+            defaults: { heartbeat: { every: "0m" } },
+            entries: { main: {}, ops: {} },
+          },
+          session: { store: storePath },
+        };
+        for (const [agentId, name, archived] of [
+          ["main", "current", allArchived],
+          ["main", "history", true],
+          ["ops", "history", true],
+          ["retired", "history", true],
+        ] as const) {
+          replaceSessionEntrySync(
+            { agentId, storePath, sessionKey: `agent:${agentId}:${name}` },
+            {
+              sessionId: `${agentId}-${name}`,
+              updatedAt: 1,
+              ...(archived ? { archivedAt: 2 } : {}),
+            },
+          );
+        }
+        closeOpenClawAgentDatabasesForTest();
+
+        const stored = sessionAccessor.readSessionStoreSummaryReadOnly(
+          { agentId: "main", storePath },
+          { agentIds: ["main", "ops"], recentLimit: 10 },
+        );
+        expect(stored.count).toBe(4);
+        expect(stored.recent.filter(({ entry }) => entry.archivedAt !== undefined)).toHaveLength(
+          allArchived ? 4 : 3,
+        );
+        const summary = await getStatusSummary({ config, includeChannelSummary: false });
+        expect(summary.sessions.count).toBe(4);
+        expect(summary.sessions.paths).toEqual([storePath]);
+        expect(summary.sessions.byAgent.map(({ agentId, count }) => [agentId, count])).toEqual([
+          ["main", 2],
+          ["ops", 1],
+        ]);
+        const rows = buildStatusCommandOverviewRows(
+          createStatusCommandOverviewRowsParams({ summary }),
+        );
+        expect(rows.find(({ Item }) => Item === "Sessions")?.Value).toMatch(/^4 stored · default /);
+      });
+    },
+  );
+
+  it("bounds session payload hydration to the recent status window", async () => {
+    await withOpenClawTestState({ prefix: "openclaw-status-recent-window-" }, async (state) => {
+      const config = {
+        agents: { defaults: { heartbeat: { every: "0m" } }, entries: { main: {} } },
+      };
+      const storePath = resolveSessionStorePathCore(undefined, {
+        agentId: "main",
+        env: state.env,
+      });
+      for (let index = 1; index <= 24; index += 1) {
+        replaceSessionEntrySync(
+          { agentId: "main", storePath, sessionKey: `agent:main:history-${index}` },
+          {
+            sessionId: `status-history-${index}`,
+            updatedAt: index,
+            pluginExtensions: {
+              fixture: { history: Array.from({ length: 64 }, () => "x".repeat(128)) },
+            },
+          },
+        );
+      }
+      await getStatusSummary({ config, includeChannelSummary: false });
+      const clone = vi.spyOn(globalThis, "structuredClone");
+      const parse = vi.spyOn(JSON, "parse");
+      const parsedSessionPayloads = () =>
+        parse.mock.calls.filter(([json]) => json.includes('"sessionId":"status-history-'));
+      try {
+        const summary = await getStatusSummary({ config, includeChannelSummary: false });
+
+        expect(parsedSessionPayloads()).toHaveLength(10);
+        expect(summary.sessions.count).toBe(24);
+        expect(summary.sessions.byAgent[0]?.count).toBe(24);
+        expect(summary.sessions.recent.map(({ key }) => key)).toEqual(
+          Array.from({ length: 10 }, (_, index) => `agent:main:history-${24 - index}`),
+        );
+        expect(
+          clone.mock.calls.filter(([value]) => {
+            const sessionId = (value as { sessionId?: unknown })?.sessionId;
+            return typeof sessionId === "string" && sessionId.startsWith("status-history-");
+          }),
+        ).toHaveLength(0);
+
+        parse.mockClear();
+        const hidden = await getStatusSummary({
+          config,
+          includeChannelSummary: false,
+          includeSensitive: false,
+        });
+        expect(hidden.sessions.count).toBe(24);
+        expect(parsedSessionPayloads()).toHaveLength(0);
+      } finally {
+        parse.mockRestore();
+        clone.mockRestore();
+      }
+    });
   });
 });

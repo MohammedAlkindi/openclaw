@@ -3,6 +3,7 @@ import "@awesome.me/webawesome/dist/components/dialog/dialog.js";
 import type WaDialog from "@awesome.me/webawesome/dist/components/dialog/dialog.js";
 import { css, html, type PropertyValues } from "lit";
 import { property, query } from "lit/decorators.js";
+import { acquireNativeOverlayOcclusion } from "../lib/native-overlay-occlusion.ts";
 import { OpenClawLitElement } from "../lit/openclaw-element.ts";
 
 const modalLayers = (document.openClawModalLayers ??= new Set<HTMLElement>());
@@ -26,9 +27,12 @@ export class OpenClawModalDialog extends OpenClawLitElement {
   private returnFocusOverride: HTMLElement | null | undefined;
   private syncGeneration = 0;
   private suppressNextCancel = false;
+  private releaseNativeOcclusion?: () => void;
 
   static override styles = css`
     :host {
+      /* Slotted document panels share the standard/fullscreen shell height limit. */
+      --openclaw-modal-height-limit: var(--openclaw-modal-max-height, calc(100dvh - 48px));
       display: contents;
     }
 
@@ -40,7 +44,7 @@ export class OpenClawModalDialog extends OpenClawLitElement {
 
     wa-dialog::part(dialog) {
       max-width: var(--openclaw-modal-max-width, calc(100vw - 48px));
-      max-height: var(--openclaw-modal-max-height, calc(100dvh - 48px));
+      max-height: var(--openclaw-modal-height-limit);
       padding: 0;
       border: 0;
       background: transparent;
@@ -53,13 +57,16 @@ export class OpenClawModalDialog extends OpenClawLitElement {
       overflow: visible;
     }
 
+    :host(.fullscreen) {
+      --openclaw-modal-height-limit: calc(100dvh - 20px);
+    }
+
     :host(.fullscreen) wa-dialog {
       --width: calc(100vw - 20px);
     }
 
     :host(.fullscreen) wa-dialog::part(dialog) {
       max-width: calc(100vw - 20px);
-      max-height: calc(100dvh - 20px);
     }
 
     :host(.viewport-edge-to-edge) wa-dialog {
@@ -75,7 +82,9 @@ export class OpenClawModalDialog extends OpenClawLitElement {
       border-radius: 0;
     }
 
-    :host(.viewport-edge-to-edge) wa-dialog::part(body) {
+    /* Slotted scroll containers need the body's definite viewport height. */
+    :host(.viewport-edge-to-edge) wa-dialog::part(body),
+    :host(.drawer) wa-dialog::part(body) {
       height: 100%;
     }
 
@@ -85,6 +94,8 @@ export class OpenClawModalDialog extends OpenClawLitElement {
     }
 
     :host(.palette) wa-dialog {
+      --openclaw-modal-backdrop-filter: none;
+      --wa-color-overlay-modal: color-mix(in oklab, black 12%, transparent);
       --show-duration: 0ms;
       --hide-duration: 0ms;
     }
@@ -126,13 +137,16 @@ export class OpenClawModalDialog extends OpenClawLitElement {
       }
     }
     @media (max-width: 640px) {
+      :host {
+        --openclaw-modal-height-limit: 90dvh;
+      }
+
       wa-dialog {
         --width: min(var(--openclaw-modal-width, 540px), calc(100vw - 24px));
       }
 
       wa-dialog::part(dialog) {
         max-width: var(--openclaw-modal-max-width, calc(100vw - 24px));
-        max-height: 90dvh;
       }
     }
 
@@ -162,11 +176,15 @@ export class OpenClawModalDialog extends OpenClawLitElement {
       this.open = false;
     }
     super.connectedCallback();
+    if (this.open) {
+      this.releaseNativeOcclusion ??= acquireNativeOverlayOcclusion();
+    }
     void this.updateComplete.then(() => this.syncDialogOpen());
   }
 
   override disconnectedCallback() {
     setModalLayer(this, false);
+    this.clearNativeOcclusion();
     this.syncGeneration += 1;
     const webAwesomeDialog = this.webAwesomeDialog;
     const dialog = webAwesomeDialog?.shadowRoot?.querySelector("dialog");
@@ -192,8 +210,8 @@ export class OpenClawModalDialog extends OpenClawLitElement {
         without-header
         light-dismiss
         .label=${this.label}
-        @wa-show=${this.handleShow}
-        @wa-after-show=${this.handleAfterShow}
+        @focusin=${this.handleInitialFocus}
+        @wa-after-show=${this.handleInitialFocus}
         @wa-after-hide=${this.handleAfterHide}
         @wa-hide=${this.handleHide}
       >
@@ -205,6 +223,9 @@ export class OpenClawModalDialog extends OpenClawLitElement {
   protected override updated(changed: PropertyValues<this>) {
     if (changed.has("open")) {
       setModalLayer(this, this.open);
+      if (this.open && this.isConnected) {
+        this.releaseNativeOcclusion ??= acquireNativeOverlayOcclusion();
+      }
     }
     void this.syncAccessibility();
     void this.syncDialogOpen();
@@ -233,7 +254,14 @@ export class OpenClawModalDialog extends OpenClawLitElement {
     if (webAwesomeDialog.open || dialog?.open) {
       this.suppressNextCancel = true;
       webAwesomeDialog.open = false;
+    } else {
+      this.clearNativeOcclusion();
     }
+  }
+
+  private clearNativeOcclusion() {
+    this.releaseNativeOcclusion?.();
+    this.releaseNativeOcclusion = undefined;
   }
 
   private async syncAccessibility() {
@@ -260,37 +288,35 @@ export class OpenClawModalDialog extends OpenClawLitElement {
     }
   }
 
-  private handleAfterShow = (event?: Event) => {
-    if (event && event.target !== event.currentTarget) {
+  private handleInitialFocus = (event: Event) => {
+    if (event.target !== event.currentTarget) {
       return;
     }
     if (!this.isConnected) {
       return;
     }
-    // Both the scheduled show hook and wa-after-show land here, and the second
-    // arrives after the open animation. If focus already moved to a slotted
-    // field (user click, autofill, e2e input), refocusing the autofocus target
-    // would steal it mid-typing; `this` means focus sits on dialog chrome.
-    const active = document.activeElement;
+    // Late animation completion must not replace focus already inside the form.
+    const root = this.getRootNode();
+    const active =
+      root instanceof ShadowRoot ? root.activeElement : this.ownerDocument.activeElement;
     if (active instanceof HTMLElement && active !== this && this.contains(active)) {
       return;
     }
-    const autofocusTarget = this.querySelector<HTMLElement>("[autofocus]");
-    autofocusTarget?.focus({ preventScroll: true });
-  };
-
-  private handleShow = (event: Event) => {
-    if (event.target !== event.currentTarget) {
-      return;
-    }
-    // Web Awesome cannot see autofocus targets through this adapter's slot.
-    queueMicrotask(() => requestAnimationFrame(() => this.handleAfterShow()));
+    // Web Awesome's opening frame focuses its native dialog without seeing our
+    // slotted content. Restore the field it just displaced before input arrives.
+    const previous = event instanceof FocusEvent ? event.relatedTarget : null;
+    const target =
+      previous instanceof HTMLElement && this.contains(previous)
+        ? previous
+        : this.querySelector<HTMLElement>("[autofocus]");
+    target?.focus({ preventScroll: true });
   };
 
   private handleAfterHide = (event: Event) => {
     if (event.target !== event.currentTarget) {
       return;
     }
+    this.clearNativeOcclusion();
     const returnFocus = this.returnFocusOverride;
     const originalReturnFocus = this.returnFocus;
     this.returnFocusOverride = undefined;

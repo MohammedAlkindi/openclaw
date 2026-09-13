@@ -26,13 +26,13 @@ import { pruneMemoryEntryOrigins, reserveMemoryEntryOrigins } from "./memory-ent
 import { withMemoryWorkspaceLock } from "./memory-workspace-lock.js";
 import {
   buildPromotionMarker,
+  commitMemoryContent,
   extractPromotionKeys,
   hashMemoryContent,
   isAtomicReplacePermissionError,
   MemoryWriteConflictError,
   readMemoryContent,
   resolveMemoryWritePath,
-  writeMemoryContent,
 } from "./short-term-promotion-memory-write.js";
 import {
   buildPromotionRecallAnnotations,
@@ -48,6 +48,7 @@ import {
   type ApplyShortTermPromotionsOptions,
   type ApplyShortTermPromotionsResult,
   type PromotionCandidate,
+  type PromotionRejectionCategory,
   type ShortTermRecallEntry,
 } from "./short-term-promotion-types.js";
 import {
@@ -275,39 +276,68 @@ export async function applyShortTermPromotions(
     // sacrifices trusted lines in a mixed file so untrusted text cannot promote.
     return withDailyFileQuarantine(authoritative, dailyProvenanceByPath);
   });
-  const rejectionReasons = new Map<string, string>();
+  const rejections = new Map<string, { reason: string; category: PromotionRejectionCategory }>();
+  const reject = (key: string, category: PromotionRejectionCategory, reason: string): false => {
+    rejections.set(key, { category, reason });
+    return false;
+  };
+  const describeRejection = (candidate: PromotionCandidate) => ({
+    candidate,
+    ...(rejections.get(candidate.key) ?? {
+      // Late revalidation has several causes; do not attribute a more specific gate.
+      category: "candidate changed" as const,
+      reason: "candidate changed during apply",
+    }),
+  });
   const eligible = currentCandidates.filter((candidate) => {
     const latest = store.entries[candidate.key];
-    const queryCount = Math.max(candidate.uniqueQueries, candidate.recallDays.length);
     // Explicit untrusted/system origins never promote on ANY path (append or
     // consolidation): recall frequency must never launder externally-derived
     // content into MEMORY.md. Workspace memory files index as 'agent', so
     // legitimate daily-note candidates stay eligible.
-    const reason = isPromotionOriginBlocked(candidate)
-      ? `origin filter (${candidate.provenance?.originClass})`
+    return isPromotionOriginBlocked(candidate)
+      ? reject(candidate.key, "origin", `origin filter (${candidate.provenance?.originClass})`)
       : options.consolidation && (!latest || !isConsolidationCandidateEligible(candidate))
-        ? "consolidation origin/session filter"
+        ? latest
+          ? reject(
+              candidate.key,
+              "consolidation origin/session",
+              "consolidation origin/session filter",
+            )
+          : false
         : isContaminatedDreamingSnippet(candidate.snippet)
-          ? "contamination filter"
+          ? reject(candidate.key, "contamination", "contamination filter")
           : candidate.promotedAt || latest?.promotedAt
-            ? "already promoted"
+            ? reject(candidate.key, "already promoted", "already promoted")
             : candidate.score < minScore
-              ? `score threshold (${candidate.score.toFixed(3)} < ${minScore})`
+              ? reject(
+                  candidate.key,
+                  "score threshold",
+                  `score threshold (${candidate.score.toFixed(3)} < ${minScore})`,
+                )
               : candidate.signalCount < minRecallCount
-                ? `signal threshold (${candidate.signalCount} < ${minRecallCount})`
-                : queryCount < minUniqueQueries
-                  ? `query threshold (${queryCount} < ${minUniqueQueries})`
+                ? reject(
+                    candidate.key,
+                    "signal threshold",
+                    `signal threshold (${candidate.signalCount} < ${minRecallCount})`,
+                  )
+                : candidate.uniqueQueries < minUniqueQueries
+                  ? reject(
+                      candidate.key,
+                      "query threshold",
+                      `query threshold (${candidate.uniqueQueries} < ${minUniqueQueries})`,
+                    )
                   : maxAgeDays >= 0 && candidate.ageDays > maxAgeDays
-                    ? `age threshold (${candidate.ageDays.toFixed(1)}d > ${maxAgeDays}d)`
-                    : undefined;
-    if (reason) {
-      rejectionReasons.set(candidate.key, reason);
-    }
-    return !reason;
+                    ? reject(
+                        candidate.key,
+                        "age threshold",
+                        `age threshold (${candidate.ageDays.toFixed(1)}d > ${maxAgeDays}d)`,
+                      )
+                    : true;
   });
   const selected = eligible.slice(0, limit);
   for (const candidate of eligible.slice(limit)) {
-    rejectionReasons.set(candidate.key, `selection limit (${limit})`);
+    reject(candidate.key, "selection limit", `selection limit (${limit})`);
   }
 
   const rehydratedSelected: PromotionCandidate[] = [];
@@ -329,8 +359,13 @@ export async function applyShortTermPromotions(
       rehydratedSelected.push(rehydrated);
       plannedSourceFingerprints.set(candidate.key, sourceFingerprintAfter);
     } else {
-      rejectionReasons.set(
+      reject(
         candidate.key,
+        !rehydrated
+          ? "source rehydration"
+          : sourceFingerprintBefore !== sourceFingerprintAfter
+            ? "source changed"
+            : "contamination",
         !rehydrated
           ? "source rehydration failed"
           : sourceFingerprintBefore !== sourceFingerprintAfter
@@ -347,10 +382,7 @@ export async function applyShortTermPromotions(
       appended: 0,
       reconciledExisting: 0,
       appliedCandidates: [],
-      rejectedCandidates: currentCandidates.map((candidate) => ({
-        candidate,
-        reason: rejectionReasons.get(candidate.key) ?? "candidate changed during apply",
-      })),
+      rejectedCandidates: currentCandidates.map(describeRejection),
       compactedSections: 0,
       compactedDates: [],
     };
@@ -385,10 +417,10 @@ export async function applyShortTermPromotions(
       ? Math.max(0, Math.floor(options.memoryFileMaxChars))
       : DEFAULT_MEMORY_FILE_MAX_CHARS;
   const consolidationPlan =
-    options.consolidation?.subagent && toAppend.length > 0
+    options.agentId && options.consolidation?.subagent && toAppend.length > 0
       ? await consolidateMemory({
+          agentId: options.agentId,
           subagent: options.consolidation.subagent,
-          workspaceDir,
           existingMemory,
           candidates: toAppend,
           ...(options.consolidation.model ? { model: options.consolidation.model } : {}),
@@ -525,9 +557,9 @@ export async function applyShortTermPromotions(
           operations: consolidationPlan.operations,
         });
         try {
-          await writeMemoryContent({
-            memoryPath,
-            memoryWritePath,
+          await commitMemoryContent({
+            filePath: memoryWritePath,
+            tempPrefix: `${path.basename(memoryPath)}.promotion`,
             expectedHash: consolidationBaseMemoryHash,
             content: consolidationResult.content,
           });
@@ -589,9 +621,9 @@ export async function applyShortTermPromotions(
           const content = `${header}${withTrailingNewline(baseMemory)}${section}`;
           // Append fallback keeps the historical read-modify-replace contract. Policy accepts
           // its external-editor race because OpenClaw writers remain serialized by this sweep lock.
-          await writeMemoryContent({
-            memoryPath,
-            memoryWritePath,
+          await commitMemoryContent({
+            filePath: memoryWritePath,
+            tempPrefix: `${path.basename(memoryPath)}.promotion`,
             expectedHash: hashMemoryContent(existingMemory),
             expectedContent: existingMemory,
             allowInPlaceFallback: true,
@@ -693,10 +725,7 @@ export async function applyShortTermPromotions(
     appliedCandidates: committedCandidates,
     rejectedCandidates: currentCandidates
       .filter((candidate) => !committedCandidates.some((applied) => applied.key === candidate.key))
-      .map((candidate) => ({
-        candidate,
-        reason: rejectionReasons.get(candidate.key) ?? "candidate changed during apply",
-      })),
+      .map(describeRejection),
     compactedSections: compactedDates.length,
     compactedDates,
   };

@@ -10,6 +10,7 @@ import {
   resolveSendableOutboundReplyParts,
 } from "openclaw/plugin-sdk/reply-payload";
 import { normalizeOptionalString } from "openclaw/plugin-sdk/string-coerce-runtime";
+import { resolveMatrixExtraContent } from "../../outbound.js";
 import type { CoreConfig, MatrixStreamingMode, ReplyToMode } from "../../types.js";
 import type { MatrixClient } from "../sdk.js";
 import type { createMatrixDraftController } from "./handler-draft-controller.js";
@@ -178,9 +179,24 @@ export function createMatrixReplyDispatcher(config: {
           );
         }
 
+        const deliverFallback = async () =>
+          await deliverMatrixReplies({
+            cfg,
+            replies: [fallbackPayload],
+            roomId,
+            client,
+            runtime,
+            replyToMode,
+            hasRepliedRef,
+            threadId: threadTarget,
+            replyToId: threadTarget ?? replyToEventId ?? undefined,
+            accountId,
+            mediaLocalRoots,
+          });
         const payloadReplyMismatch =
-          !threadTarget &&
-          (replyToMode !== "off" || payload.replyToTag || payload.replyToCurrent) &&
+          ((!threadTarget && replyToMode !== "off") ||
+            payload.replyToTag ||
+            payload.replyToCurrent) &&
           normalizeOptionalString(payload.replyToId) !== draftController.currentReplyToId();
         let mustDeliverFinalNormally = draftStream.mustDeliverFinalNormally();
         const canPotentiallyFinalizeDraft =
@@ -241,15 +257,24 @@ export function createMatrixReplyDispatcher(config: {
                 discardPending: async () => {},
                 id: () => draftEventId,
               },
-              buildFinalEdit: () => ({
-                text: finalPreviewText,
-                finalizeLive: !(
-                  quietDraftStreaming || !draftStream.matchesPreparedText(finalPreviewText)
-                ),
-                ...(quietDraftStreaming
-                  ? { extraContent: buildMatrixFinalizedPreviewContent() }
-                  : {}),
-              }),
+              buildFinalEdit: () => {
+                // Finalizing the live draft in place keeps that event's fields, so a reply
+                // whose controls live in event content has to finalize through an edit.
+                const presentationContent = resolveMatrixExtraContent(payload);
+                const extraContent = {
+                  ...(quietDraftStreaming ? buildMatrixFinalizedPreviewContent() : {}),
+                  ...presentationContent,
+                };
+                return {
+                  text: finalPreviewText,
+                  finalizeLive: !(
+                    quietDraftStreaming ||
+                    Boolean(presentationContent) ||
+                    !draftStream.matchesPreparedText(finalPreviewText)
+                  ),
+                  ...(Object.keys(extraContent).length > 0 ? { extraContent } : {}),
+                };
+              },
               editFinal: async (_draftEventId, edit) => {
                 if (edit.finalizeLive) {
                   if (!(await draftStream.finalizeLive())) {
@@ -281,20 +306,7 @@ export function createMatrixReplyDispatcher(config: {
               fallbackResult = await settleDraftReplacement({
                 draftEventId,
                 draftContent: draftStream.content() ?? preparedFinalPreviewContent,
-                deliver: async () =>
-                  await deliverMatrixReplies({
-                    cfg,
-                    replies: [fallbackPayload],
-                    roomId,
-                    client,
-                    runtime,
-                    replyToMode,
-                    hasRepliedRef,
-                    threadId: threadTarget,
-                    replyToId: threadTarget ?? replyToEventId ?? undefined,
-                    accountId,
-                    mediaLocalRoots,
-                  }),
+                deliver: deliverFallback,
               });
               return fallbackResult.visibleReplySent;
             },
@@ -423,20 +435,6 @@ export function createMatrixReplyDispatcher(config: {
             payloadReplyMismatch ||
             mustDeliverFinalNormally ||
             draftFinalTextNeedsNormalMentionDelivery);
-        const deliverFallback = async () =>
-          await deliverMatrixReplies({
-            cfg,
-            replies: [fallbackPayload],
-            roomId,
-            client,
-            runtime,
-            replyToMode,
-            hasRepliedRef,
-            threadId: threadTarget,
-            replyToId: threadTarget ?? replyToEventId ?? undefined,
-            accountId,
-            mediaLocalRoots,
-          });
         const draftContent = draftStream.content();
         if (shouldRedactDraft && draftEventId && draftContent) {
           return await completeDelivery(

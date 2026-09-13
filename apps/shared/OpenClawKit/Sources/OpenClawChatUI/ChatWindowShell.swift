@@ -3,10 +3,9 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Native macOS chat window: sessions sidebar + transcript detail with the
-/// pickers promoted into the unified window toolbar. The compact menu-bar
-/// panel keeps using `OpenClawChatView` directly; this shell is the full
-/// window experience.
+/// Native macOS chat window with a sessions sidebar and conversation toolbar.
+/// Draft controls belong to the composer; the compact menu-bar panel keeps
+/// using `OpenClawChatView` directly.
 @MainActor
 public struct OpenClawChatWindowShell: View {
     public nonisolated static let assistantTraceDefaultsKey = "openclaw.webchat.showAssistantTrace"
@@ -14,12 +13,13 @@ public struct OpenClawChatWindowShell: View {
     public nonisolated static let assistantToolActivityDefaultsKey = "openclaw.webchat.showAssistantToolActivity"
 
     @State private var viewModel: OpenClawChatViewModel
+    @Environment(\.colorScheme) private var colorScheme
     @State private var sessionQuery = ""
     @State private var isConfirmingClearHistory = false
     @State private var isPresentingSessions = false
     @State private var isRenamingSession = false
     @State private var isPresentingNewSessionOptions = false
-    @State private var renameSessionKey: String?
+    @State private var renameSessionTarget: OpenClawChatSessionTarget?
     @State private var renameText = ""
     private let userAccent: Color?
     private let displayOptions: OpenClawChatDisplayOptions
@@ -59,25 +59,33 @@ public struct OpenClawChatWindowShell: View {
             ChatSessionSidebar(
                 viewModel: self.viewModel,
                 query: self.$sessionQuery)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 340)
+                .navigationSplitViewColumnWidth(min: 220, ideal: 260, max: 360)
         } detail: {
             OpenClawChatView(
                 viewModel: self.viewModel,
                 drawsBackground: false,
                 userAccent: self.userAccent,
                 displayOptions: self.displayOptions,
+                assistantName: self.viewModel.selectedAgent?.displayName,
+                assistantAvatarText: self.viewModel.selectedAgent?.emoji,
+                showsAssistantAvatars: false,
                 composerChrome: .clean,
+                messagePlaceholder: self.viewModel.selectedAgent.map {
+                    String(format: String(localized: "Message %@…"), $0.displayName)
+                },
                 emptyAssistantIntro: self.emptyAssistantIntro,
                 emptyAssistantPrompts: self.emptyAssistantPrompts,
                 talkControl: self.talkControl,
                 voiceNoteControl: self.voiceNoteControl,
                 speech: self.speech,
                 mediaPlaybackAllowed: self.mediaPlaybackAllowed)
+                .environment(\.openClawChatDesktopLayout, true)
                 .navigationTitle(self.activeSessionTitle)
-                .navigationSubtitle(self.subtitle)
                 .toolbar { self.detailToolbar }
                 .background(self.keyboardShortcutHandlers)
+                .background(OpenClawChatTheme.desktopCanvas(in: self.colorScheme))
         }
+        .task { await self.viewModel.refreshAgents() }
         .confirmationDialog(
             "Clear this thread's history?",
             isPresented: self.$isConfirmingClearHistory)
@@ -99,12 +107,15 @@ public struct OpenClawChatWindowShell: View {
         .alert(String(localized: "Rename Thread"), isPresented: self.$isRenamingSession) {
                 TextField(String(localized: "Thread name"), text: self.$renameText)
                 Button(String(localized: "Rename")) {
-                    guard let renameSessionKey else { return }
-                    self.viewModel.renameSession(key: renameSessionKey, label: self.renameText)
-                    self.renameSessionKey = nil
+                    guard let target = self.renameSessionTarget else { return }
+                    self.viewModel.renameSession(
+                        key: target.sessionKey,
+                        label: self.renameText,
+                        agentID: target.agentID)
+                    self.renameSessionTarget = nil
                 }
                 Button(String(localized: "Cancel"), role: .cancel) {
-                    self.renameSessionKey = nil
+                    self.renameSessionTarget = nil
                 }
             }
             .sheet(isPresented: self.$isPresentingSessions) {
@@ -171,176 +182,39 @@ public struct OpenClawChatWindowShell: View {
     }
 
     private var activeSessionEntry: OpenClawChatSessionEntry? {
-        self.viewModel.sessions.first { $0.key == self.viewModel.sessionKey } ??
-            self.viewModel.sessions.first {
-                self.viewModel.matchesCurrentSessionKey(
-                    incoming: $0.key,
-                    current: self.viewModel.sessionKey)
-            }
+        self.viewModel.currentSessionEntry()
     }
 
     private var activeSessionKey: String {
         self.activeSessionEntry?.key ?? self.viewModel.sessionKey
     }
 
-    private var subtitle: String {
-        let model = self.currentModelLabel
-        guard let usage = self.viewModel.contextUsage, let cost = usage.totalCost else {
-            return model
-        }
-        let costLabel = ChatContextUsageFormatter.cost(cost)
-        return model.isEmpty ? costLabel : "\(model) · \(costLabel)"
-    }
-
-    private var currentModelLabel: String {
-        if self.viewModel.modelSelectionID != OpenClawChatViewModel.defaultModelSelectionID {
-            return self.viewModel.modelSelectionID
-        }
-        let entry = self.viewModel.sessions.first { $0.key == self.viewModel.sessionKey }
-        for candidate in [entry?.model, self.viewModel.sessionDefaults?.model] {
-            if let trimmed = candidate?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
-                return trimmed
-            }
-        }
-        return ""
-    }
-
     @ToolbarContentBuilder
     private var detailToolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            if let usage = self.viewModel.contextUsage {
-                ChatContextUsageMenu(usage: usage) {
-                    self.viewModel.requestSessionCompact()
+        ToolbarItem(placement: .principal) {
+            HStack(spacing: 8) {
+                if let agent = self.viewModel.selectedAgent {
+                    ChatSidebarAgentAvatar(agent: agent, size: 26)
                 }
-            }
-
-            if self.viewModel.showsThinkingPicker {
-                self.thinkingPicker
-            }
-
-            self.verbosityPicker
-            if self.viewModel.selectedModelSupportsFastMode {
-                self.fastModeToggle
-            }
-
-            if self.viewModel.showsModelPicker {
-                self.modelPicker
-            }
-
-            self.sessionActionsMenu
-        }
-    }
-
-    private var thinkingPicker: some View {
-        Picker(selection: Binding(
-            get: { self.viewModel.thinkingSelectionID },
-            set: { self.viewModel.selectThinkingLevel($0) }))
-        {
-            Text(String(localized: "Default (inherited)"))
-                .font(OpenClawChatTypography.body)
-                .tag(OpenClawChatViewModel.inheritedThinkingSelectionID)
-            ForEach(self.viewModel.thinkingLevelOptions) { option in
-                Text(String(
-                    format: String(localized: "%@ (override)"),
-                    option.label))
-                    .font(OpenClawChatTypography.body)
-                    .tag(option.id)
-            }
-        } label: {
-            Text("Thinking")
-                .font(OpenClawChatTypography.body)
-        }
-        .pickerStyle(.menu)
-        .help(String(localized: "Thinking level"))
-        .disabled(self.viewModel.isUpdatingSessionSettings)
-    }
-
-    private var verbosityPicker: some View {
-        Picker(selection: Binding(
-            get: { self.viewModel.verboseLevel },
-            set: { self.viewModel.selectVerboseLevel($0) }))
-        {
-            Text(String(localized: "Default (inherited)"))
-                .tag(OpenClawChatViewModel.inheritedThinkingSelectionID)
-            Text(String(localized: "Off")).tag("off")
-            Text(String(localized: "On")).tag("on")
-            Text(String(localized: "Full")).tag("full")
-        } label: {
-            Text(String(localized: "Verbosity"))
-                .font(OpenClawChatTypography.body)
-        }
-        .pickerStyle(.menu)
-        .help(String(localized: "Verbosity"))
-        .disabled(self.viewModel.isUpdatingSessionSettings)
-    }
-
-    private var fastModeToggle: some View {
-        Picker(selection: Binding(
-            get: { self.viewModel.fastModeSelectionID },
-            set: { self.viewModel.selectFastMode($0) }))
-        {
-            Text(String(localized: "Default (inherited)"))
-                .tag(OpenClawChatViewModel.inheritedThinkingSelectionID)
-            Text(String(localized: "On")).tag("on")
-            Text(String(localized: "Off")).tag("off")
-        } label: {
-            Label(String(localized: "Fast"), systemImage: "bolt.fill")
-        }
-        .pickerStyle(.menu)
-        .help(String(localized: "Fast responses"))
-        .disabled(self.viewModel.isUpdatingSessionSettings)
-    }
-
-    private var modelPicker: some View {
-        let sections = self.viewModel.modelPickerSections
-        return Picker(selection: Binding(
-            get: { self.viewModel.modelSelectionID },
-            set: { self.viewModel.selectModel($0) }))
-        {
-            Text(self.viewModel.defaultModelLabel)
-                .font(OpenClawChatTypography.body)
-                .tag(OpenClawChatViewModel.defaultModelSelectionID)
-            if !sections.pinned.isEmpty {
-                Section("Pinned") { self.modelOptions(sections.pinned) }
-            }
-            if !sections.recent.isEmpty {
-                Section("Recent") { self.modelOptions(sections.recent) }
-            }
-            ForEach(sections.providers) { provider in
-                Section {
-                    self.modelOptions(provider.models)
-                } header: {
-                    HStack(spacing: 4) {
-                        Text(provider.displayName)
-                        if provider.isDefaultProvider {
-                            Text(String(localized: "Default"))
-                                .font(OpenClawChatTypography.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(self.activeSessionTitle)
+                        .font(OpenClawChatTypography.body(size: 13, weight: .semibold, relativeTo: .headline))
+                    if let agent = self.viewModel.selectedAgent {
+                        Text(verbatim: agent.displayName)
+                            .font(OpenClawChatTypography.caption)
+                            .foregroundStyle(.secondary)
                     }
                 }
-            }
-        } label: {
-            Text("Model")
-                .font(OpenClawChatTypography.body)
-        }
-        .pickerStyle(.menu)
-        .help("Model")
-        .disabled(self.viewModel.isUpdatingSessionSettings)
-    }
-
-    private func modelOptions(_ models: [OpenClawChatModelChoice]) -> some View {
-        ForEach(models) { model in
-            HStack(spacing: 4) {
-                Text(model.displayLabel)
-                    .font(OpenClawChatTypography.body)
-                if self.viewModel.isDefaultModel(model) {
-                    Text(String(localized: "Default"))
-                        .font(OpenClawChatTypography.caption)
-                        .foregroundStyle(.secondary)
+                .lineLimit(1)
+                if OpenClawSessionColor(name: self.activeSessionEntry?.color) != nil {
+                    OpenClawSessionColorDot(color: self.activeSessionEntry?.color)
                 }
             }
-            .tag(model.selectionID)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+        }
+        ToolbarItem(placement: .primaryAction) {
+            self.sessionActionsMenu
         }
     }
 
@@ -377,7 +251,7 @@ public struct OpenClawChatWindowShell: View {
             Divider()
 
             Button {
-                self.renameSessionKey = self.activeSessionKey
+                self.renameSessionTarget = self.viewModel.currentSessionTarget
                 self.renameText = self.activeSessionEntry?.label ?? self.activeSessionTitle
                 self.isRenamingSession = true
             } label: {
@@ -387,7 +261,8 @@ public struct OpenClawChatWindowShell: View {
             }
 
             Button {
-                Task { await self.viewModel.forkSession(key: self.activeSessionKey) }
+                let target = self.viewModel.currentSessionTarget
+                Task { await self.viewModel.forkSession(key: target.sessionKey, agentID: target.agentID) }
             } label: {
                 chatWindowActionLabel(
                     LocalizedStringKey(
@@ -400,7 +275,8 @@ public struct OpenClawChatWindowShell: View {
             Button {
                 self.viewModel.setSessionPinned(
                     key: self.activeSessionKey,
-                    pinned: self.activeSessionEntry?.pinned != true)
+                    pinned: self.activeSessionEntry?.pinned != true,
+                    agentID: self.viewModel.currentSessionTarget.agentID)
             } label: {
                 chatWindowActionLabel(
                     LocalizedStringKey(self.activeSessionEntry?.pinned == true
@@ -412,7 +288,8 @@ public struct OpenClawChatWindowShell: View {
             Button {
                 self.viewModel.setSessionUnread(
                     key: self.activeSessionKey,
-                    unread: self.activeSessionEntry?.unread != true)
+                    unread: self.activeSessionEntry?.unread != true,
+                    agentID: self.viewModel.currentSessionTarget.agentID)
             } label: {
                 chatWindowActionLabel(
                     LocalizedStringKey(self.activeSessionEntry?.unread == true
@@ -424,7 +301,7 @@ public struct OpenClawChatWindowShell: View {
             if self.activeSessionEntry.map({
                 ChatSessionSidebarModel.canArchiveSession(
                     $0,
-                    mainSessionKey: self.viewModel.resolvedMainSessionKey)
+                    mainSessionKey: self.viewModel.selectedAgentMainSessionKey)
             }) == true {
                 Button {
                     if let activeSessionEntry = self.activeSessionEntry {
@@ -440,6 +317,16 @@ public struct OpenClawChatWindowShell: View {
                         systemImage: self.activeSessionEntry?.isArchived == true
                             ? "tray.and.arrow.up"
                             : "archivebox")
+                }
+            }
+
+            OpenClawSessionColorMenu(color: self.activeSessionEntry?.color) { color in
+                let target = self.viewModel.currentSessionTarget
+                Task {
+                    await self.viewModel.setSessionColor(
+                        key: target.sessionKey,
+                        color: color,
+                        agentID: target.agentID)
                 }
             }
 
@@ -525,43 +412,6 @@ public struct OpenClawChatWindowShell: View {
             guard response == .OK, let url = panel.url else { return }
             try? markdown.write(to: url, atomically: true, encoding: .utf8)
         }
-    }
-}
-
-/// Toolbar gauge + dropdown with token/cost details, mirroring the web UI's
-/// context ring.
-private struct ChatContextUsageMenu: View {
-    let usage: OpenClawChatContextUsage
-    let onCompact: () -> Void
-
-    var body: some View {
-        Menu {
-            Text(self.tokensLine)
-                .font(OpenClawChatTypography.body(size: 13, weight: .regular, relativeTo: .body))
-            if let cost = self.usage.totalCost {
-                Text(verbatim: String(
-                    format: String(localized: "Thread cost %@"),
-                    ChatContextUsageFormatter.cost(cost)))
-                    .font(OpenClawChatTypography.body(size: 13, weight: .regular, relativeTo: .body))
-            }
-            Divider()
-            Button(action: self.onCompact) {
-                Text("Compact Thread")
-                    .font(OpenClawChatTypography.body(size: 13, weight: .regular, relativeTo: .body))
-            }
-        } label: {
-            ChatContextUsageIndicator(usage: self.usage)
-        }
-        .menuIndicator(.hidden)
-        .help(self.tokensLine)
-    }
-
-    private var tokensLine: String {
-        let used = ChatContextUsageFormatter.tokens(self.usage.usedTokens)
-        guard let window = self.usage.contextWindowTokens else {
-            return "\(used) tokens used"
-        }
-        return "\(used) of \(ChatContextUsageFormatter.tokens(window)) tokens used"
     }
 }
 

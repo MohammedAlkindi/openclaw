@@ -96,6 +96,11 @@ automatic expiry; long revision histories can retain growing origin sets.
 
 When backfill coalesces the same claim from several sessions, it retains every
 source origin without counting the repeated claim as extra evidence.
+Session-backfill diary lines also carry markers tied to source origins before
+publication. This includes REM facts, reflections, and combined claims, even
+when displayed citations are shortened or a later apply step fails. Forgetting
+any contributing session removes the whole marked line, not unrelated diary
+lines. Earlier unmarked backfill diaries do not gain lineage retroactively.
 
 Coverage is not universal. Handwritten notes, direct agent edits, and entries
 staged before lineage tracking may lack entry origins. The report's
@@ -187,9 +192,14 @@ merged prose. Surviving sources may support a new entry later, but automatic
 reconstruction is not guaranteed.
 
 The cleanup covers matching promoted entries, session-corpus lines, memory
-index chunks and their full-text/vector rows, cached embeddings, short-term
-state, ingestion deduplication state, and dreaming rewrite preimages. It also
-removes whole lines containing exact selected corpus snippets from scanned
+index chunks and their full-text/vector rows, short-term state, ingestion
+deduplication state, and dreaming rewrite preimages. A nonempty session selection
+also clears the selected agent's entire embedding cache, including results from
+unfinished rebuilds that are not yet linked to published chunks. Unrelated
+published index entries remain usable; later indexing may need to regenerate
+cached embeddings. Dry runs report this removal without applying it.
+
+The purge also removes whole lines containing exact selected corpus snippets from scanned
 memory files and dream diaries. The
 [command reference](/cli/memory#memory-forget) describes the counters and
 selection limits.

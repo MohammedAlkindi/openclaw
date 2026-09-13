@@ -1,7 +1,8 @@
 import { spawnSync } from "node:child_process";
-import { globSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path, { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import {
@@ -11,7 +12,10 @@ import {
   splitExtensionTestJobTargets,
 } from "../../scripts/lib/extension-test-plan.mts";
 import { createVitestRunSpecs } from "../../scripts/test-projects.test-support.mts";
+import { resolveTestNodeExecPath } from "../../src/test-utils/node-process.js";
 import { createExtensionTelegramVitestConfig } from "../vitest/vitest.extension-telegram.config.ts";
+
+const testNodeExecPath = resolveTestNodeExecPath();
 
 type WorkflowStep = {
   env?: Record<string, string>;
@@ -20,10 +24,20 @@ type WorkflowStep = {
 };
 
 type PluginPrereleaseMatrixRow = {
+  check_name: string;
   extensions_csv: string;
   includePatterns: string[];
   task: string;
 };
+
+const FROZEN_TARGET_EXTENSION_PLAN_URL = new URL(
+  "../fixtures/plugin-prerelease-frozen-target/scripts/lib/extension-test-plan.mjs",
+  import.meta.url,
+);
+const FROZEN_TARGET_TELEGRAM_CONFIG_URL = new URL(
+  "../fixtures/plugin-prerelease-frozen-target/test/vitest/vitest.extension-telegram.config.mjs",
+  import.meta.url,
+);
 
 function readPluginPrereleaseWorkflow() {
   return parse(readFileSync(".github/workflows/plugin-prerelease.yml", "utf8"));
@@ -40,7 +54,7 @@ function listTelegramRunnableTestFiles() {
     .toSorted((left, right) => left.localeCompare(right));
 }
 
-function runPluginPrereleaseManifest() {
+function runPluginPrereleaseManifest(cwd = process.cwd()) {
   const workflow = readPluginPrereleaseWorkflow();
   const manifestStep = workflow.jobs.preflight.steps.find(
     (step: WorkflowStep) => step.name === "Build plugin prerelease manifest",
@@ -65,8 +79,8 @@ function runPluginPrereleaseManifest() {
       GITHUB_OUTPUT: outputPath,
     };
     delete env.OPENCLAW_VITEST_INCLUDE_FILE;
-    const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module"], {
-      cwd: process.cwd(),
+    const result = spawnSync(testNodeExecPath, ["--import", "tsx", "--input-type=module"], {
+      cwd,
       encoding: "utf8",
       env,
       input: source,
@@ -90,6 +104,28 @@ function runPluginPrereleaseManifest() {
 }
 
 describe("plugin prerelease Telegram extension shards", () => {
+  it("preserves target-native batches when a frozen planner has no job splitter", () => {
+    const fixtureRoot = path.resolve(
+      path.dirname(fileURLToPath(FROZEN_TARGET_EXTENSION_PLAN_URL)),
+      "../..",
+    );
+    const matrix = runPluginPrereleaseManifest(fixtureRoot);
+    const batchRows = matrix.include.filter((row) => row.task === "extensions-batch");
+
+    expect(existsSync(FROZEN_TARGET_TELEGRAM_CONFIG_URL)).toBe(true);
+    expect(matrix.include.every((row) => row.task !== "extension-file-shard")).toBe(true);
+    expect(batchRows.map((row) => row.check_name)).toEqual([
+      "checks-node-extensions-shard-1",
+      "checks-node-extensions-shard-2",
+    ]);
+    expect(batchRows.map((row) => row.extensions_csv)).toEqual(["alpha,telegram", "zeta"]);
+    expect(
+      batchRows
+        .flatMap((row) => row.extensions_csv.split(","))
+        .filter((extensionId) => extensionId === "telegram"),
+    ).toEqual(["telegram"]);
+  });
+
   it("keeps Telegram out of balanced batches and covers every extension exactly once", () => {
     const allShards = createExtensionTestShards({
       cwd: process.cwd(),
