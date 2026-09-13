@@ -1,3 +1,5 @@
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -223,7 +225,40 @@ describe.skipIf(process.platform !== "win32")("Doctor native Windows OneDrive fl
             ]
           : [],
       );
-      expect(readPreservedFiles(preservedFiles)).toEqual(before);
+      const after = readPreservedFiles(preservedFiles);
+      assert.equal(after.length, before.length, `${placement}: snapshot file count`);
+      for (const [index, expected] of before.entries()) {
+        const label = `${placement}: ${path.relative(home, expected.file)}`;
+        const actual = after[index];
+        assert.ok(actual, `${label}: missing snapshot`);
+        assert.equal(actual.file === expected.file, true, `${label}: file`);
+        assert.equal(actual.exists, expected.exists, `${label}: exists`);
+        assert.equal(actual.mode, expected.mode, `${label}: mode`);
+        assert.equal(
+          actual.bytes === undefined,
+          expected.bytes === undefined,
+          `${label}: bytes present`,
+        );
+        if (actual.bytes !== undefined && expected.bytes !== undefined) {
+          if (!actual.bytes.equals(expected.bytes)) {
+            let offset = 0;
+            const limit = Math.min(actual.bytes.length, expected.bytes.length);
+            while (offset < limit && actual.bytes[offset] === expected.bytes[offset]) {
+              offset += 1;
+            }
+            assert.fail(
+              `${label}: bytes ${JSON.stringify({
+                expectedLength: expected.bytes.length,
+                actualLength: actual.bytes.length,
+                expectedSha256: createHash("sha256").update(expected.bytes).digest("hex"),
+                actualSha256: createHash("sha256").update(actual.bytes).digest("hex"),
+                firstDifferentOffset: offset,
+              })}`,
+            );
+          }
+        }
+      }
+      expect(after).toEqual(before);
       expect(cfg).toEqual({ agents: { entries: { main: {} } } });
       expect(env[cloudVariable]).toBe(placement === "ambient-env-only" ? undefined : cloudRoot);
       expect(fs.existsSync(stateDir)).toBe(!missing);
