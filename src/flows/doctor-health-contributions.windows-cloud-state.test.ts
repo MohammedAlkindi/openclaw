@@ -51,16 +51,18 @@ afterEach(() => {
   tempDirs.cleanup();
 });
 
-function readPreservedFiles(files: string[]) {
+function readPreservedFiles(files: string[], sqliteShmFiles: ReadonlySet<string>) {
   return files.map((file) => {
     if (!fs.existsSync(file)) {
       return { file, exists: false };
     }
+    const stat = fs.statSync(file);
     return {
       file,
       exists: true,
-      bytes: fs.readFileSync(file),
-      mode: fs.statSync(file).mode,
+      bytes: sqliteShmFiles.has(file) ? undefined : fs.readFileSync(file),
+      mode: stat.mode,
+      size: stat.size,
     };
   });
 }
@@ -142,7 +144,9 @@ describe.skipIf(process.platform !== "win32")("Doctor native Windows OneDrive fl
           ["", "-wal", "-shm", "-journal"].map((suffix) => `${database}${suffix}`),
         ),
       ];
-      const before = readPreservedFiles(preservedFiles);
+      // SQLite SHM is mutable reader coordination, not DB content: sqlite.org/walformat.html.
+      const sqliteShmFiles = new Set(databases.map((database) => `${database}-shm`));
+      const before = readPreservedFiles(preservedFiles, sqliteShmFiles);
       const mode = missing ? undefined : fs.statSync(stateDir).mode;
       const unrelatedRunner = vi.fn(async () => {
         throw new Error("An unrelated Doctor contribution ran");
@@ -225,7 +229,7 @@ describe.skipIf(process.platform !== "win32")("Doctor native Windows OneDrive fl
             ]
           : [],
       );
-      const after = readPreservedFiles(preservedFiles);
+      const after = readPreservedFiles(preservedFiles, sqliteShmFiles);
       assert.equal(after.length, before.length, `${placement}: snapshot file count`);
       for (const [index, expected] of before.entries()) {
         const label = `${placement}: ${path.relative(home, expected.file)}`;
@@ -234,6 +238,7 @@ describe.skipIf(process.platform !== "win32")("Doctor native Windows OneDrive fl
         assert.equal(actual.file === expected.file, true, `${label}: file`);
         assert.equal(actual.exists, expected.exists, `${label}: exists`);
         assert.equal(actual.mode, expected.mode, `${label}: mode`);
+        assert.equal(actual.size, expected.size, `${label}: size`);
         assert.equal(
           actual.bytes === undefined,
           expected.bytes === undefined,
@@ -258,7 +263,6 @@ describe.skipIf(process.platform !== "win32")("Doctor native Windows OneDrive fl
           }
         }
       }
-      expect(after).toEqual(before);
       expect(cfg).toEqual({ agents: { entries: { main: {} } } });
       expect(env[cloudVariable]).toBe(placement === "ambient-env-only" ? undefined : cloudRoot);
       expect(fs.existsSync(stateDir)).toBe(!missing);
