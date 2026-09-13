@@ -48,6 +48,7 @@ import type { HealthFinding, HealthRepairEffect } from "../flows/health-checks.j
 import { safeRealpathSync } from "../infra/boundary-path.js";
 import { findGitRoot } from "../infra/git-root.js";
 import { resolveRequiredHomeDir } from "../infra/home-dir.js";
+import { resolveEnvironmentValue } from "../infra/process-env.js";
 import {
   loadLegacySessionStore,
   updateLegacySessionStore,
@@ -683,9 +684,9 @@ export function detectWindowsCloudSyncedStateDir(
       roots.push({ storage, root });
     }
   };
-  addRoot("OneDrive", env.OneDrive);
-  addRoot("OneDrive", env.OneDriveConsumer);
-  addRoot("OneDrive for Business", env.OneDriveCommercial);
+  addRoot("OneDrive", resolveEnvironmentValue(env, "OneDrive", platform));
+  addRoot("OneDrive", resolveEnvironmentValue(env, "OneDriveConsumer", platform));
+  addRoot("OneDrive for Business", resolveEnvironmentValue(env, "OneDriveCommercial", platform));
   if (roots.length === 0) {
     return null;
   }
@@ -825,7 +826,7 @@ export function detectStateIntegrityHealthIssues(
     });
   }
 
-  const windowsCloudSyncedStateDir = detectWindowsCloudSyncedStateDir(stateDir);
+  const windowsCloudSyncedStateDir = detectWindowsCloudSyncedStateDir(stateDir, { env });
   if (windowsCloudSyncedStateDir) {
     issues.push({
       kind: "windows-cloud-state-dir",

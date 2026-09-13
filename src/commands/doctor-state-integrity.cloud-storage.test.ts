@@ -195,32 +195,22 @@ describe("detectWindowsCloudSyncedStateDir", () => {
   const oneDriveRoot = path.join(home, "OneDrive");
   const oneDriveBusinessRoot = path.join(home, "OneDrive - Contoso");
 
-  it("detects state dir under the OneDrive sync root", () => {
-    const stateDir = path.join(oneDriveRoot, "OpenClaw", ".openclaw");
+  it.each([
+    { key: "OneDrive", root: oneDriveRoot, storage: "OneDrive" },
+    { key: "OneDriveConsumer", root: oneDriveRoot, storage: "OneDrive" },
+    { key: "OneDriveCommercial", root: oneDriveBusinessRoot, storage: "OneDrive for Business" },
+    { key: "ONEDRIVE", root: oneDriveRoot, storage: "OneDrive" },
+    { key: "onedriveconsumer", root: oneDriveRoot, storage: "OneDrive" },
+    { key: "oNeDrIvEcOmMeRcIaL", root: oneDriveBusinessRoot, storage: "OneDrive for Business" },
+  ])("detects $key from a frozen environment snapshot", ({ key, root, storage }) => {
+    const stateDir = path.join(root, "OpenClaw", ".openclaw");
+    const env = Object.freeze({ [key]: root });
 
-    const result = detectWindowsCloudSyncedStateDir(stateDir, {
-      platform: "win32",
-      env: { OneDrive: oneDriveRoot },
-    });
-
-    expect(result).toEqual({
+    expect(detectWindowsCloudSyncedStateDir(stateDir, { platform: "win32", env })).toEqual({
       path: path.resolve(stateDir),
-      storage: "OneDrive",
+      storage,
     });
-  });
-
-  it("detects state dir under the OneDrive for Business sync root", () => {
-    const stateDir = path.join(oneDriveBusinessRoot, "OpenClaw", ".openclaw");
-
-    const result = detectWindowsCloudSyncedStateDir(stateDir, {
-      platform: "win32",
-      env: { OneDriveCommercial: oneDriveBusinessRoot },
-    });
-
-    expect(result).toEqual({
-      path: path.resolve(stateDir),
-      storage: "OneDrive for Business",
-    });
+    expect(env).toEqual({ [key]: root });
   });
 
   it("matches sync roots case-insensitively", () => {
