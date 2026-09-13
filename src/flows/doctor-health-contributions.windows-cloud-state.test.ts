@@ -82,6 +82,10 @@ describe.skipIf(process.platform !== "win32")("Doctor native Windows OneDrive fl
       let storage = "OneDrive";
       let missing = false;
       switch (placement) {
+        case "consumer":
+        case "selected-env-only":
+        case "ambient-env-only":
+          break;
         case "business":
           storage = "OneDrive for Business";
           break;
@@ -129,9 +133,7 @@ describe.skipIf(process.platform !== "win32")("Doctor native Windows OneDrive fl
         databases.push(openOpenClawStateDatabase({ env }).path);
         databases.push(openOpenClawAgentDatabase({ agentId: "main", env }).path);
       }
-      // Compare closed families so ordinary read handles cannot masquerade as relocation.
-      closeOpenClawAgentDatabasesForTest();
-      closeOpenClawStateDatabaseForTest();
+      // Keep the seeded owners open on both sides; read-only opens can create sidecars.
       const preservedFiles = [
         configPath,
         ...databases.flatMap((database) =>
@@ -221,8 +223,6 @@ describe.skipIf(process.platform !== "win32")("Doctor native Windows OneDrive fl
             ]
           : [],
       );
-      closeOpenClawAgentDatabasesForTest();
-      closeOpenClawStateDatabaseForTest();
       expect(readPreservedFiles(preservedFiles)).toEqual(before);
       expect(cfg).toEqual({ agents: { entries: { main: {} } } });
       expect(env[cloudVariable]).toBe(placement === "ambient-env-only" ? undefined : cloudRoot);
